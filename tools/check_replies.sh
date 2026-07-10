@@ -70,6 +70,22 @@ if [[ -f "$TELEGRAM_INCOMING" && -s "$TELEGRAM_INCOMING" ]]; then
     > "$TELEGRAM_INCOMING"
 
     NEW_MESSAGES=1
+
+    # ── Command dispatch ────────────────────────────────────────────────────
+    # If any Telegram line contains a /command, dispatch it immediately and
+    # reply via Telegram. Non-fatal — command failure never breaks check_replies.
+    while IFS= read -r line; do
+        # Extract message text: last field after " | " separator
+        msg_text=$(echo "$line" | awk -F' \\| ' '{print $NF}')
+        if [[ "$msg_text" == /* ]]; then
+            echo "check_replies: dispatching command: $msg_text"
+            RESPONSE=$(/usr/bin/python3 "$SCRIPT_DIR/command_dispatcher.py" "$msg_text" 2>&1) || true
+            if [[ -n "$RESPONSE" ]]; then
+                printf '%s' "$RESPONSE" | bash "$SCRIPT_DIR/telegram_send.sh" >/dev/null 2>&1 || true
+                echo "check_replies: command response sent"
+            fi
+        fi
+    done <<< "$TG_CONTENT"
 else
     echo "Telegram webhook: no new messages"
 fi
