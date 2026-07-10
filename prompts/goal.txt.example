@@ -1,0 +1,3 @@
+# Place the agent's current goal here.
+# This file is read by wake.sh and injected into the session prompt.
+# One goal per file. Keep it focused.

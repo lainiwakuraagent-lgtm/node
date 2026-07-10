@@ -1,0 +1,46 @@
+# Agent state — never commit
+state/sessions_tonight.count
+state/sessions_tonight.date
+state/sessions_emergency.count
+state/sessions_manual.count
+state/lock
+state/nexus_lain_token.txt
+state/nexus_last_read.json
+state/nexus_conversation_state.json
+state/trigger_token.txt
+state/current_loom_session_id.txt
+state/loom_context.json
+state/behavioral_context.txt
+state/session_start_epoch
+state/session_model.txt
+state/emergency_mode.active
+
+# Logs — keep structure, skip content
+logs/*.log
+logs/*.out
+logs/*.err
+logs/session_log.csv
+
+# Memory — instance-specific, keep structure
+memory/latest_summary.md
+memory/progress.md
+memory/learnings.md
+memory/learnings_digest.md
+memory/index.md
+memory/narrative_log.md
+memory/conversation.md
+memory/sessions/
+memory/work/
+
+# Identity — credentials never go to git
+identity/credentials.md
+identity/nexus_seed_passwords.txt
+
+# Python cache
+tools/__pycache__/
+*.pyc
+*.pyo
+
+# Venv
+.venv/
+__pycache__/
