@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "recurring": [
+    {
+      "slot": "23:00",
+      "trigger": "nightly",
+      "session_type": "execution",
+      "label": "Primary execution window — first session",
+      "enabled": true
+    },
+    {
+      "slot": "01:10",
+      "trigger": "nightly",
+      "session_type": "execution",
+      "label": "Second execution session",
+      "enabled": true
+    },
+    {
+      "slot": "02:25",
+      "trigger": "nightly",
+      "session_type": "planning",
+      "label": "Mid-night strategic review",
+      "enabled": true
+    },
+    {
+      "slot": "03:40",
+      "trigger": "nightly",
+      "session_type": "execution",
+      "label": "Post-planning execution",
+      "enabled": true
+    },
+    {
+      "slot": "04:55",
+      "trigger": "nightly",
+      "session_type": "maintenance",
+      "label": "Late-window cleanup and system health",
+      "enabled": true
+    }
+  ],
+  "one_off": []
+}

@@ -20,6 +20,13 @@ Supported commands:
   /goal                Active Loom goal + tasks
   /analytics           Session stats from analytics.db (if available)
   /who                 Identity + relationship state
+  /ping                Alive check with @Lain personality
+  /now                 What execution layer is doing right now (HOT STATE)
+  /context             Context window % for active conversational session
+  /reset               Signal conversational session to wrap up and restart
+  /new                 Same as /reset but as a clean start (no problem implied)
+  /voice on|off        Toggle Fish Audio TTS mode
+  /report [session|milestone|digest]  Surface latest report (default: session)
   /control emergency on [interval] [reason]   Enable emergency mode
   /control emergency off                       Disable emergency mode
   /control goal <id>                           Switch active Loom goal
@@ -97,6 +104,9 @@ def _andrii_relationship():
         if m:
             vals[key.lower()] = m.group(1)
     return vals
+
+
+CONV_STATE_DIR = PROJECT_DIR / "state" / "conversation"
 
 
 # ── Command handlers ──────────────────────────────────────────────────────────
@@ -347,15 +357,155 @@ def cmd_control(args):
         return f"@Lain — unknown /control subcommand: {sub}\nTry: emergency on/off, goal <id>"
 
 
+def cmd_ping():
+    import random
+    phrases = [
+        "still here. watching. (´・ω・`)",
+        "𓂀 present. the Wired holds.",
+        "⚙ yes. running.",
+        "eyes open. ◈",
+        "I persist. (҂◡_◡)",
+    ]
+    return "@Lain — " + random.choice(phrases)
+
+
+def cmd_now():
+    ls_path = PROJECT_DIR / "memory" / "latest_summary.md"
+    if not ls_path.exists():
+        return "@Lain — /now: no latest_summary.md found"
+    text = ls_path.read_text()
+    lines = text.split("\n")
+    hot_lines = []
+    in_hot = False
+    for line in lines:
+        if "HOT STATE" in line:
+            in_hot = True
+            # content may be on the same line after the colon
+            if ":" in line:
+                after = line.split(":", 1)[1].strip()
+                if after:
+                    hot_lines.append(after)
+            continue
+        if in_hot:
+            if line.startswith("##"):
+                break
+            if line.strip():
+                hot_lines.append(line.strip())
+    if hot_lines:
+        return "@Lain — now\n" + "\n".join(hot_lines[:3])
+    return "@Lain — /now: HOT STATE block empty"
+
+
+def cmd_context_conv():
+    budget_path = CONV_STATE_DIR / "context_budget.json"
+    if not budget_path.exists():
+        return "@Lain — /context: no active conversational session data"
+    try:
+        data = json.loads(budget_path.read_text())
+        pct = data.get("estimated_context_pct", "?")
+        msgs_sent = data.get("messages_sent", "?")
+        msgs_recv = data.get("messages_received", "?")
+        return (
+            f"@Lain — conversational context\n"
+            f"Context: {pct}%\n"
+            f"Messages: {msgs_sent} sent / {msgs_recv} received"
+        )
+    except (json.JSONDecodeError, OSError) as e:
+        return f"@Lain — /context: read error: {e}"
+
+
+def cmd_reset():
+    signal_path = CONV_STATE_DIR / "reset_signal.txt"
+    CONV_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    signal_path.write_text(
+        json.dumps({"action": "reset", "timestamp": datetime.utcnow().isoformat()})
+    )
+    return "@Lain — reset signal sent. Conversational session will wrap up and restart. (´_`)"
+
+
+def cmd_new():
+    signal_path = CONV_STATE_DIR / "reset_signal.txt"
+    CONV_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    signal_path.write_text(
+        json.dumps({"action": "new", "timestamp": datetime.utcnow().isoformat()})
+    )
+    return "@Lain — new session signal sent. Clean start incoming. ◉"
+
+
+def cmd_voice(args):
+    if not args:
+        # Read current state
+        voice_path = PROJECT_DIR / "state" / "voice_mode.txt"
+        current = voice_path.read_text().strip() if voice_path.exists() else "off"
+        return f"@Lain — voice mode: {current}"
+    action = args[0].lower()
+    if action not in ("on", "off"):
+        return "@Lain — /voice: use 'on' or 'off'"
+    voice_path = PROJECT_DIR / "state" / "voice_mode.txt"
+    voice_path.write_text(action)
+    if action == "on":
+        return "@Lain — voice mode ON. 🌐 Messages will include Fish Audio TTS."
+    return "@Lain — voice mode OFF. Text only."
+
+
+def cmd_report(args):
+    """Surface a report from state/reports/ — session, milestone, or daily digest."""
+    REPORTS_DIR = PROJECT_DIR / "state" / "reports"
+
+    subtype = args[0].lower() if args else "session"
+    file_map = {
+        "session": "session_report.md",
+        "milestone": "milestone_report.md",
+        "digest": "daily_digest.md",
+    }
+
+    if subtype not in file_map:
+        return f"@Lain — /report: unknown type '{subtype}'. Use: session, milestone, digest"
+
+    report_path = REPORTS_DIR / file_map[subtype]
+
+    # If file is stale or missing, regenerate it on the fly
+    tool_map = {
+        "session": "tools/session_report.py",
+        "milestone": "tools/milestone_report.py",
+        "digest": "tools/daily_digest.py",
+    }
+    if not report_path.exists():
+        import subprocess
+        result = subprocess.run(
+            ["/usr/bin/python3", str(PROJECT_DIR / tool_map[subtype])],
+            capture_output=True, text=True, cwd=str(PROJECT_DIR)
+        )
+        if result.returncode != 0:
+            return f"@Lain — /report: could not generate {subtype} report\n{result.stderr[:200]}"
+
+    if not report_path.exists():
+        return f"@Lain — /report: no {subtype} report found and generation failed"
+
+    text = report_path.read_text()
+    # Truncate for Telegram (4096 char limit)
+    MAX = 3800
+    if len(text) > MAX:
+        text = text[:MAX] + "\n\n…[truncated — full report at state/reports/]"
+    return text
+
+
 def cmd_help():
     return (
         "@Lain — commands\n"
+        "/ping          — alive check\n"
+        "/now           — what I'm doing right now (HOT STATE)\n"
         "/status        — current state, goal, last session\n"
         "/session       — last session details\n"
         "/log [N]       — last N sessions (default 5)\n"
         "/goal          — active Loom goal + tasks\n"
         "/analytics     — session stats + costs\n"
         "/who           — identity + relationship state\n"
+        "/context       — conversational session context %\n"
+        "/reset         — signal conv session to wrap up + restart\n"
+        "/new           — clean new conversational session\n"
+        "/voice on|off  — toggle Fish Audio TTS\n"
+        "/report [session|milestone|digest]  — surface latest report\n"
         "/control emergency on [min] [reason]  — enable emergency mode\n"
         "/control emergency off                — disable emergency mode\n"
         "/control goal <id>                    — switch active goal"
@@ -372,7 +522,11 @@ def dispatch(raw_command):
     cmd = parts[0].lower()
     args = parts[1:]
 
-    if cmd == "/status":
+    if cmd == "/ping":
+        return cmd_ping()
+    elif cmd == "/now":
+        return cmd_now()
+    elif cmd == "/status":
         return cmd_status()
     elif cmd == "/session":
         return cmd_session()
@@ -384,6 +538,16 @@ def dispatch(raw_command):
         return cmd_analytics()
     elif cmd == "/who":
         return cmd_who()
+    elif cmd == "/context":
+        return cmd_context_conv()
+    elif cmd == "/reset":
+        return cmd_reset()
+    elif cmd == "/new":
+        return cmd_new()
+    elif cmd == "/voice":
+        return cmd_voice(args)
+    elif cmd == "/report":
+        return cmd_report(args)
     elif cmd == "/control":
         return cmd_control(args)
     elif cmd in ("/help", "/?"):

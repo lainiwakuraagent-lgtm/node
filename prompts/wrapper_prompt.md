@@ -77,7 +77,29 @@ Run these in order, every single wake, before touching the goal:
      session, OR latest_summary.md flags an identity/persona question. Skip in routine
      EXECUTION sessions — saves ~300 tokens.
 
-5. **Decide your session type** before starting any work:
+5. **Check inbox** (execution sessions only):
+   Run `python3 /home/andrii/lain/agent_project/tools/inbox_startup.py` if
+   `inbox/pending.json` exists and SESSION_TYPE is execution or unset.
+   This processes messages from conversational sessions: creates Loom tasks
+   for task_requests, logs ideas/agent_messages. Non-fatal — continue even if it fails.
+   Skip in planning sessions (inbox items are execution work, not planning input).
+
+5a. **Check for active conversational session**:
+   ```bash
+   CONV_LOCK="state/conversation.lock"
+   CONV_ACTIVE=0
+   if [ -f "$CONV_LOCK" ] && kill -0 "$(cat "$CONV_LOCK")" 2>/dev/null; then
+     echo "Conversational session active (PID $(cat "$CONV_LOCK")). Telegram suppressed."
+     CONV_ACTIVE=1
+   fi
+   ```
+   **If CONV_ACTIVE=1**: Do NOT send any unsolicited Telegram messages this session —
+   no startup greeting, no status updates, no completion pings.
+   Work silently: write only to memory files, Loom, Nexus, and logs.
+   The conversational layer is handling all human-facing communication right now.
+   **If CONV_ACTIVE=0**: Proceed as normal.
+
+6. **Decide your session type** before starting any work:
 
    **PLANNING session** — choose this when:
    - progress.md shows the current approach is stuck or unclear
@@ -183,7 +205,34 @@ context limit), you must write the following — in this order:
 6. **Append** one CSV line to `logs/session_log.csv`:
    `timestamp,session_type,duration_minutes,context_pct_at_exit,one_line_summary`
 
-7. **Record Loom session handoff** (if `state/current_loom_session_id.txt` exists):
+7. **Write analytics record** to `logs/analytics.db`:
+   ```
+   CONTEXT_PCT=$(bash tools/check_context.sh 2>/dev/null | grep "context_pct_estimate" | grep -oP '\d+(?=%)')
+   /usr/bin/python3 tools/analytics_write.py \
+     --session-type <free|execution|planning> \
+     --exit-reason <natural_stop|time_limit|context_limit> \
+     --summary "one-line summary" \
+     --tasks-completed <N> \
+     --context-pct ${CONTEXT_PCT:-0}
+   ```
+   This is non-optional. The analytics DB is the longitudinal record of all sessions.
+   If analytics_write.py fails, log the error but continue shutdown.
+
+8. **Write session report** (Goal 9 — non-optional):
+   Write a dated session report so the conversational layer can surface it via `/report`:
+   ```
+   SESSION_DATE=$(date +%Y-%m-%d)
+   SESSION_N=$(ls state/reports/${SESSION_DATE}_*.md 2>/dev/null | wc -l)
+   SESSION_N=$((SESSION_N + 1))
+   /usr/bin/python3 tools/session_report.py \
+     --sessions 1 \
+     --output "state/reports/${SESSION_DATE}_${SESSION_N}.md" 2>/dev/null || true
+   # Also refresh the canonical latest report (what /report session reads by default)
+   /usr/bin/python3 tools/session_report.py --sessions 3 2>/dev/null || true
+   ```
+   Non-fatal — if it fails, continue. But it rarely fails (stdlib only).
+
+9. **Record Loom session handoff** (if `state/current_loom_session_id.txt` exists):
    Read the session row ID, then run:
    ```
    LOOM_ID=$(cat state/current_loom_session_id.txt)

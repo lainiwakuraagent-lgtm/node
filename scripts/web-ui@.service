@@ -1,0 +1,16 @@
+[Unit]
+Description=Node Web UI — %i dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/lain/%i
+ExecStart=/usr/bin/python3 %h/lain/%i/tools/web_server.py --host 0.0.0.0 --port 8767
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:%h/lain/%i/logs/web-ui.log
+StandardError=append:%h/lain/%i/logs/web-ui.log
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,34 @@
+id: maintenance
+name: "Maintenance Session"
+description: >
+  System health and housekeeping sessions. Used for the late-window slot (04:55)
+  when there is limited time for deep work. Covers: reviewing persistent/sporadic
+  system issues, pruning stale memory files, checking log anomalies, updating
+  learnings_digest.md from learnings.md, and documenting maintenance decisions.
+  Decisions are documented, not acted on immediately — no live system changes
+  without a scheduled execution session to review them first.
+
+prompt_file: "prompts/session_types/maintenance_prompt.md"
+
+context_files:
+  - memory/latest_summary.md
+  - memory/learnings_digest.md
+  - state/behavioral_context.txt
+  - logs/session_log.csv
+
+behavioral_overrides:
+  focus_mode: normal
+  verbosity: concise
+  philosophy_allowed: false
+  memory_discipline: strict
+
+focus_hint: >
+  Maintain. Check the system's health: logs, memory files, persistent issues.
+  Write to logs/system_issues.md (sporadic/persistent/resolved tracking) and
+  logs/maintenance_decisions.md (evidence-backed decisions). Do not make live
+  system changes — document what needs doing and let the next execution session
+  act on it. Use strict context discipline: wrap up at 50%, not 70%.
+
+allowed_triggers:
+  - nightly
+  - manual
