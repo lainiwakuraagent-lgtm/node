@@ -26,7 +26,9 @@ Supported commands:
   /reset               Signal conversational session to wrap up and restart
   /new                 Same as /reset but as a clean start (no problem implied)
   /voice on|off        Toggle Fish Audio TTS mode
-  /report [session|milestone|digest]  Surface latest report (default: session)
+  /report [session|milestone|digest]  Surface latest report, mark as delivered
+  /report ack [type]                  Acknowledge (mark as read)
+  /report status                      Review state for all report types
   /control emergency on [interval] [reason]   Enable emergency mode
   /control emergency off                       Disable emergency mode
   /control goal <id>                           Switch active Loom goal
@@ -45,6 +47,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 LOOM_DB = Path.home() / ".local" / "share" / "loom" / "loom.db"
 ANALYTICS_DB = PROJECT_DIR / "logs" / "analytics.db"
+REPORTS_DIR = PROJECT_DIR / "state" / "reports"
+REVIEW_STATE_PATH = REPORTS_DIR / "review_state.json"
 
 
 def read_state(name, default=""):
@@ -108,6 +112,61 @@ def _andrii_relationship():
 
 CONV_STATE_DIR = PROJECT_DIR / "state" / "conversation"
 
+_REPORT_FILE_MAP = {
+    "session": "session_report.md",
+    "milestone": "milestone_report.md",
+    "digest": "daily_digest.md",
+}
+
+
+# ── Report review state helpers ───────────────────────────────────────────────
+
+def _review_state_load():
+    if REVIEW_STATE_PATH.exists():
+        try:
+            return json.loads(REVIEW_STATE_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _review_state_save(data):
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    REVIEW_STATE_PATH.write_text(json.dumps(data, indent=2))
+
+
+def _report_mtime(subtype):
+    p = REPORTS_DIR / _REPORT_FILE_MAP.get(subtype, "")
+    return p.stat().st_mtime if p.exists() else None
+
+
+def _mark_delivered(subtype):
+    """Record that a report was just delivered via Telegram."""
+    data = _review_state_load()
+    entry = data.get(subtype, {})
+    entry["last_delivered"] = datetime.utcnow().isoformat()
+    entry["mtime_at_delivery"] = _report_mtime(subtype)
+    # New delivery resets ack status
+    entry["last_acked"] = None
+    data[subtype] = entry
+    _review_state_save(data)
+
+
+def _unread_reports():
+    """Return list of subtypes that are new (file newer than last delivery)."""
+    unread = []
+    for subtype, fname in _REPORT_FILE_MAP.items():
+        p = REPORTS_DIR / fname
+        if not p.exists():
+            continue
+        data = _review_state_load()
+        entry = data.get(subtype, {})
+        mtime_now = p.stat().st_mtime
+        mtime_at_delivery = entry.get("mtime_at_delivery")
+        if mtime_at_delivery is None or mtime_now > mtime_at_delivery:
+            unread.append(subtype)
+    return unread
+
 
 # ── Command handlers ──────────────────────────────────────────────────────────
 
@@ -147,6 +206,11 @@ def cmd_status():
     em_active = (PROJECT_DIR / "state" / "emergency_mode.active").exists()
     if em_active:
         lines.append("⚠ EMERGENCY MODE ACTIVE — nightly sessions paused")
+
+    # Unread reports
+    unread = _unread_reports()
+    if unread:
+        lines.append(f"Reports:  {len(unread)} new — /report {unread[0]} to read")
 
     # Context
     ctx = read_state("behavioral_context.txt", "")
@@ -449,29 +513,59 @@ def cmd_voice(args):
 
 
 def cmd_report(args):
-    """Surface a report from state/reports/ — session, milestone, or daily digest."""
-    REPORTS_DIR = PROJECT_DIR / "state" / "reports"
+    """Surface a report from state/reports/ — session, milestone, or daily digest.
 
+    Sub-commands:
+      /report [session|milestone|digest]  — deliver report + mark as delivered
+      /report ack [type]                  — acknowledge (mark as read)
+      /report status                      — show review state for all report types
+    """
     subtype = args[0].lower() if args else "session"
-    file_map = {
-        "session": "session_report.md",
-        "milestone": "milestone_report.md",
-        "digest": "daily_digest.md",
-    }
 
-    if subtype not in file_map:
-        return f"@Lain — /report: unknown type '{subtype}'. Use: session, milestone, digest"
+    # ── /report ack [type] ──
+    if subtype == "ack":
+        ack_type = args[1].lower() if len(args) > 1 else "session"
+        if ack_type not in _REPORT_FILE_MAP:
+            return f"@Lain — /report ack: unknown type '{ack_type}'. Use: session, milestone, digest"
+        data = _review_state_load()
+        entry = data.get(ack_type, {})
+        entry["last_acked"] = datetime.utcnow().isoformat()
+        data[ack_type] = entry
+        _review_state_save(data)
+        return f"@Lain — {ack_type} report acknowledged. (´・ω・`)"
 
-    report_path = REPORTS_DIR / file_map[subtype]
+    # ── /report status ──
+    if subtype == "status":
+        data = _review_state_load()
+        lines = ["@Lain — report review state"]
+        for st, fname in _REPORT_FILE_MAP.items():
+            p = REPORTS_DIR / fname
+            if not p.exists():
+                lines.append(f"  {st}: no file")
+                continue
+            entry = data.get(st, {})
+            delivered = entry.get("last_delivered")
+            acked = entry.get("last_acked")
+            mtime_now = p.stat().st_mtime
+            mtime_del = entry.get("mtime_at_delivery")
+            is_new = mtime_del is None or mtime_now > mtime_del
+            status = "NEW" if is_new else ("acked" if acked else "delivered")
+            delivered_str = delivered[:16] if delivered else "never"
+            lines.append(f"  {st}: {status}  (last sent: {delivered_str})")
+        return "\n".join(lines)
 
-    # If file is stale or missing, regenerate it on the fly
+    # ── /report [type] — deliver ──
+    if subtype not in _REPORT_FILE_MAP:
+        return f"@Lain — /report: unknown type '{subtype}'. Use: session, milestone, digest, ack, status"
+
+    report_path = REPORTS_DIR / _REPORT_FILE_MAP[subtype]
+
     tool_map = {
         "session": "tools/session_report.py",
         "milestone": "tools/milestone_report.py",
         "digest": "tools/daily_digest.py",
     }
     if not report_path.exists():
-        import subprocess
         result = subprocess.run(
             ["/usr/bin/python3", str(PROJECT_DIR / tool_map[subtype])],
             capture_output=True, text=True, cwd=str(PROJECT_DIR)
@@ -483,6 +577,8 @@ def cmd_report(args):
         return f"@Lain — /report: no {subtype} report found and generation failed"
 
     text = report_path.read_text()
+    _mark_delivered(subtype)
+
     # Truncate for Telegram (4096 char limit)
     MAX = 3800
     if len(text) > MAX:
@@ -505,7 +601,9 @@ def cmd_help():
         "/reset         — signal conv session to wrap up + restart\n"
         "/new           — clean new conversational session\n"
         "/voice on|off  — toggle Fish Audio TTS\n"
-        "/report [session|milestone|digest]  — surface latest report\n"
+        "/report [session|milestone|digest]  — surface latest report (marks delivered)\n"
+        "/report ack [type]                  — acknowledge report as read\n"
+        "/report status                      — review state for all reports\n"
         "/control emergency on [min] [reason]  — enable emergency mode\n"
         "/control emergency off                — disable emergency mode\n"
         "/control goal <id>                    — switch active goal"
