@@ -45,7 +45,7 @@ if [[ -f "$REPLY_FILE" && -s "$REPLY_FILE" ]]; then
     cp "$REPLY_FILE" "$REPLY_ARCHIVE_DIR/$ARCHIVE_NAME"
 
     # Clear reply.txt so next session doesn't re-read it
-    > "$REPLY_FILE"
+    : > "$REPLY_FILE"
 
     NEW_MESSAGES=1
 fi
@@ -67,7 +67,7 @@ if [[ -f "$TELEGRAM_INCOMING" && -s "$TELEGRAM_INCOMING" ]]; then
     done < "$TELEGRAM_INCOMING"
 
     # Clear the file so next session doesn't re-read
-    > "$TELEGRAM_INCOMING"
+    : > "$TELEGRAM_INCOMING"
 
     NEW_MESSAGES=1
 

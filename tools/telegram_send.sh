@@ -10,6 +10,9 @@
 
 set -euo pipefail
 
+# Allow CURL_CMD override for testing (e.g. CURL_CMD=/path/to/stub)
+CURL="${CURL_CMD:-curl}"
+
 ENV_FILE="$HOME/.claude/.env"
 TOKEN=$(grep 'TELEGRAM_BOT_TOKEN' "$ENV_FILE" | cut -d= -f2)
 CHAT_ID=$(grep 'TELEGRAM_ALLOWED_USERS' "$ENV_FILE" | cut -d= -f2)
@@ -36,7 +39,7 @@ if [[ -z "$MESSAGE" ]]; then
     exit 2
 fi
 
-RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+RESPONSE=$($CURL -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
     --data-urlencode "chat_id=${CHAT_ID}" \
     --data-urlencode "text=${MESSAGE}")
 
