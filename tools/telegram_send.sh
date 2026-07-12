@@ -51,3 +51,10 @@ fi
 
 MSG_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['message_id'])")
 echo "sent message_id=${MSG_ID}"
+
+# ── TTS (optional) ─────────────────────────────────────────────────────────────
+VOICE_MODE_FILE="$(dirname "$(dirname "${BASH_SOURCE[0]}")")/state/voice_mode.txt"
+FISH_TTS="$(dirname "${BASH_SOURCE[0]}")/fish_tts_send.sh"
+if [[ "${SKIP_TTS:-0}" != "1" && -f "$VOICE_MODE_FILE" && "$(cat "$VOICE_MODE_FILE" 2>/dev/null | tr -d '[:space:]')" == "on" && -f "$FISH_TTS" ]]; then
+    printf '%s' "$MESSAGE" | bash "$FISH_TTS" 2>/dev/null || true
+fi
