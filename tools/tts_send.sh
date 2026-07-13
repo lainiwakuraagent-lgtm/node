@@ -17,8 +17,6 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 # ── Config ────────────────────────────────────────────────────────────────
 
 ELEVENLABS_KEY=$(grep 'ELEVENLABS_API_KEY' ~/.config/PAI/.env | cut -d= -f2)
