@@ -38,6 +38,7 @@ ENV_FILE = Path.home() / ".claude" / ".env"
 LAST_UPDATE_FILE = PROJECT_DIR / "state" / "conversation" / "last_update_id.txt"
 WATCHER_PID_FILE = PROJECT_DIR / "state" / "conversation" / "watcher.pid"
 OUTBOX_FILE = PROJECT_DIR / "state" / "conversation" / "outbox.json"
+NEXUS_ROUTING_FILE = PROJECT_DIR / "state" / "nexus_routing.json"
 
 # Long-poll timeout (seconds). Telegram holds the connection open for this long
 # if there are no updates. Shorter = more reconnects; longer = more blocking.
@@ -108,10 +109,47 @@ def remove_pid() -> None:
         pass
 
 
-def forward_outbox() -> None:
-    """Check outbox.json for pending messages from the execution layer and forward via Telegram.
+def _load_nexus_routing() -> dict:
+    """Load agent-name → nexus-conversation-id mapping from state/nexus_routing.json."""
+    if not NEXUS_ROUTING_FILE.exists():
+        return {}
+    try:
+        return json.loads(NEXUS_ROUTING_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
 
-    Reads OUTBOX_FILE, sends each unsent entry via telegram_send.sh, marks them sent.
+
+def _send_nexus(agent_name: str, content: str) -> bool:
+    """Send content to a named agent via Nexus DM. Returns True on success."""
+    routing = _load_nexus_routing()
+    convo_id = routing.get(agent_name)
+    if not convo_id:
+        print(f"outbox nexus: no routing entry for agent '{agent_name}'", file=sys.stderr)
+        return False
+    try:
+        send_proc = subprocess.run(
+            ["bash", str(SCRIPT_DIR / "nexus_send.sh"), convo_id],
+            input=content, text=True, capture_output=True, timeout=35,
+        )
+        if send_proc.returncode != 0:
+            print(f"outbox nexus send failed: {send_proc.stderr[:100]}", file=sys.stderr)
+            return False
+    except Exception as e:
+        print(f"outbox nexus send error: {e}", file=sys.stderr)
+        return False
+    return True
+
+
+def forward_outbox() -> None:
+    """Check outbox.json for pending entries and route them by type+to.
+
+    Routing:
+        type=message  + to=owner        → Telegram
+        type=question + to=owner        → Telegram (prefixed "Question for you:")
+        type=message  + to=agent:<name> → Nexus DM
+        type=question + to=agent:<name> → Nexus DM (question framing)
+        (no type/to fields)             → Telegram (backwards compatible)
+
     Non-fatal — errors are logged to stderr but do not interrupt the watcher loop.
     """
     if not OUTBOX_FILE.exists():
@@ -130,20 +168,38 @@ def forward_outbox() -> None:
             entry["sent"] = True
             changed = True
             continue
-        try:
-            send_proc = subprocess.run(
-                ["bash", str(SCRIPT_DIR / "telegram_send.sh")],
-                input=content, text=True, capture_output=True, timeout=35,
-                env={**os.environ, "SKIP_TTS": "1"},
-            )
-            if send_proc.returncode != 0:
-                print(f"outbox forward failed: {send_proc.stderr[:100]}", file=sys.stderr)
-                continue  # leave unsent, retry next cycle
-        except Exception as e:
-            print(f"outbox forward error: {e}", file=sys.stderr)
-            continue
-        entry["sent"] = True
-        changed = True
+
+        msg_type = entry.get("type", "message")
+        to = entry.get("to", "owner")
+        ok = False
+
+        if to == "owner" or not to.startswith("agent:"):
+            # Route to Telegram
+            if msg_type == "question":
+                content = f"Question for you:\n{content}"
+            try:
+                send_proc = subprocess.run(
+                    ["bash", str(SCRIPT_DIR / "telegram_send.sh")],
+                    input=content, text=True, capture_output=True, timeout=35,
+                    env={**os.environ, "SKIP_TTS": "1"},
+                )
+                if send_proc.returncode != 0:
+                    print(f"outbox telegram failed: {send_proc.stderr[:100]}", file=sys.stderr)
+                else:
+                    ok = True
+            except Exception as e:
+                print(f"outbox telegram error: {e}", file=sys.stderr)
+        else:
+            # Route to agent via Nexus DM
+            agent_name = to[len("agent:"):]
+            if msg_type == "question":
+                content = f"[question] {content}"
+            ok = _send_nexus(agent_name, content)
+
+        if ok:
+            entry["sent"] = True
+            changed = True
+        # else: leave unsent, retry next cycle
 
     if changed:
         try:
