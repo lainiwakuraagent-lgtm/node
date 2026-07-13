@@ -5,10 +5,6 @@ telegram_watcher.py — Blocking Telegram message watcher for conversational ses
 Polls Telegram getUpdates API with long-polling. Blocks until a new message
 arrives from the allowed user, then prints the message as JSON to stdout and exits.
 
-Slash commands (/status, /log, etc.) are intercepted here, dispatched to
-command_dispatcher.py, and the response sent back via telegram_send.sh.
-The agent never sees command messages — polling continues uninterrupted.
-
 IMPORTANT: getUpdates and webhooks cannot coexist (Telegram returns 409 Conflict).
 conversation.sh MUST call deleteWebhook before launching this script, and restore
 the webhook after the conversation session ends.
@@ -41,6 +37,7 @@ PROJECT_DIR = SCRIPT_DIR.parent
 ENV_FILE = Path.home() / ".claude" / ".env"
 LAST_UPDATE_FILE = PROJECT_DIR / "state" / "conversation" / "last_update_id.txt"
 WATCHER_PID_FILE = PROJECT_DIR / "state" / "conversation" / "watcher.pid"
+OUTBOX_FILE = PROJECT_DIR / "state" / "conversation" / "outbox.json"
 
 # Long-poll timeout (seconds). Telegram holds the connection open for this long
 # if there are no updates. Shorter = more reconnects; longer = more blocking.
@@ -111,6 +108,50 @@ def remove_pid() -> None:
         pass
 
 
+def forward_outbox() -> None:
+    """Check outbox.json for pending messages from the execution layer and forward via Telegram.
+
+    Reads OUTBOX_FILE, sends each unsent entry via telegram_send.sh, marks them sent.
+    Non-fatal — errors are logged to stderr but do not interrupt the watcher loop.
+    """
+    if not OUTBOX_FILE.exists():
+        return
+    try:
+        entries = json.loads(OUTBOX_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+
+    changed = False
+    for entry in entries:
+        if entry.get("sent"):
+            continue
+        content = entry.get("content", "").strip()
+        if not content:
+            entry["sent"] = True
+            changed = True
+            continue
+        try:
+            send_proc = subprocess.run(
+                ["bash", str(SCRIPT_DIR / "telegram_send.sh")],
+                input=content, text=True, capture_output=True, timeout=35,
+                env={**os.environ, "SKIP_TTS": "1"},
+            )
+            if send_proc.returncode != 0:
+                print(f"outbox forward failed: {send_proc.stderr[:100]}", file=sys.stderr)
+                continue  # leave unsent, retry next cycle
+        except Exception as e:
+            print(f"outbox forward error: {e}", file=sys.stderr)
+            continue
+        entry["sent"] = True
+        changed = True
+
+    if changed:
+        try:
+            OUTBOX_FILE.write_text(json.dumps(entries, indent=2))
+        except OSError as e:
+            print(f"outbox write error: {e}", file=sys.stderr)
+
+
 def dispatch_command(text: str) -> None:
     """Handle a /command: dispatch via command_dispatcher.py, send response via telegram_send.sh.
 
@@ -123,14 +164,15 @@ def dispatch_command(text: str) -> None:
         )
         response = result.stdout.strip()
         if not response:
-            response = f"command error: {result.stderr[:200]}" if result.stderr else "no response"
+            response = f"@Lain — command error: {result.stderr[:200]}" if result.stderr else "@Lain — no response"
     except Exception as e:
-        response = f"dispatch failed: {e}"
+        response = f"@Lain — dispatch failed: {e}"
 
     try:
+        env = {**os.environ, "SKIP_TTS": "1"}  # commands never get TTS
         send_proc = subprocess.run(
             ["bash", str(SCRIPT_DIR / "telegram_send.sh")],
-            input=response, text=True, capture_output=True, timeout=15,
+            input=response, text=True, capture_output=True, timeout=35, env=env,
         )
         if send_proc.returncode != 0:
             print(f"telegram_send failed: {send_proc.stderr[:100]}", file=sys.stderr)
@@ -205,6 +247,9 @@ def main() -> int:
             print(json.dumps(out))
             remove_pid()
             return 0
+
+        # Check outbox for pending execution-layer messages to forward
+        forward_outbox()
 
         # No relevant updates in this batch — loop continues (long-poll)
 
