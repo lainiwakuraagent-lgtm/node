@@ -71,8 +71,9 @@ loginctl enable-linger "$(whoami)" 2>/dev/null && echo "[OK] Linger enabled for 
   || echo "[WARN] Could not enable linger (may already be enabled or requires sudo)"
 
 # 4. Reload and start the timer.
-export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+_uid="$(id -u)"
+export XDG_RUNTIME_DIR="/run/user/${_uid}"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${_uid}/bus"
 
 systemctl --user daemon-reload
 echo "[OK] systemd user daemon reloaded"

@@ -17,8 +17,9 @@ EMERGENCY_FLAG="$STATE_DIR/emergency_mode.active"
 echo "=== Disabling Emergency Mode ==="
 
 # 1. Stop and disable the timer.
-export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+_uid="$(id -u)"
+export XDG_RUNTIME_DIR="/run/user/${_uid}"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${_uid}/bus"
 
 if systemctl --user is-active emergency-agent.timer &>/dev/null; then
   systemctl --user stop emergency-agent.timer
