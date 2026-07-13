@@ -29,6 +29,7 @@ Supported commands:
   /report [session|milestone|digest]  Surface latest report, mark as delivered
   /report ack [type]                  Acknowledge (mark as read)
   /report status                      Review state for all report types
+  /report search QUERY                FTS search across all historical reports
   /control emergency on [interval] [reason]   Enable emergency mode
   /control emergency off                       Disable emergency mode
   /control goal <id>                           Switch active Loom goal
@@ -519,6 +520,7 @@ def cmd_report(args):
       /report [session|milestone|digest]  — deliver report + mark as delivered
       /report ack [type]                  — acknowledge (mark as read)
       /report status                      — show review state for all report types
+      /report search QUERY                — FTS search across all historical reports
     """
     subtype = args[0].lower() if args else "session"
 
@@ -554,9 +556,23 @@ def cmd_report(args):
             lines.append(f"  {st}: {status}  (last sent: {delivered_str})")
         return "\n".join(lines)
 
+    # ── /report search QUERY ──
+    if subtype == "search":
+        query = " ".join(args[1:]).strip() if len(args) > 1 else ""
+        if not query:
+            return "@Lain — /report search: provide a query, e.g. /report search nexus asuka"
+        result = subprocess.run(
+            ["/usr/bin/python3", str(PROJECT_DIR / "tools" / "report_archive.py"), "search", query, "--limit", "5"],
+            capture_output=True, text=True, cwd=str(PROJECT_DIR)
+        )
+        out = result.stdout.strip() or "(no results)"
+        if len(out) > 3500:
+            out = out[:3500] + "\n…[truncated]"
+        return f"@Lain — report search: {query!r}\n\n{out}"
+
     # ── /report [type] — deliver ──
     if subtype not in _REPORT_FILE_MAP:
-        return f"@Lain — /report: unknown type '{subtype}'. Use: session, milestone, digest, ack, status"
+        return f"@Lain — /report: unknown type '{subtype}'. Use: session, milestone, digest, ack, status, search"
 
     report_path = REPORTS_DIR / _REPORT_FILE_MAP[subtype]
 
