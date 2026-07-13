@@ -517,7 +517,18 @@ def main():
     print(f"\nWritten: {user_path}")
 
     if args.nexus_notify:
-        post_relationship_state_to_nexus(new_trust, new_warmth, new_friction, deltas, today_str)
+        # Only post if state actually changed or has meaningful narrative/milestone
+        has_change = (
+            abs(deltas.get('delta_trust', 0)) > 0.001 or
+            abs(deltas.get('delta_warmth', 0)) > 0.001 or
+            abs(deltas.get('delta_friction', 0)) > 0.001 or
+            bool(deltas.get('milestone')) or
+            bool(deltas.get('narrative'))
+        )
+        if has_change:
+            post_relationship_state_to_nexus(new_trust, new_warmth, new_friction, deltas, today_str)
+        else:
+            print("nexus-notify: no state change — skipping quorum-ops post")
 
 
 if __name__ == '__main__':
