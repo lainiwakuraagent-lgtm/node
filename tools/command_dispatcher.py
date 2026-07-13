@@ -618,6 +618,7 @@ def cmd_help():
         "/new           — clean new conversational session\n"
         "/voice on|off  — toggle Fish Audio TTS\n"
         "/report [session|milestone|digest]  — surface latest report (marks delivered)\n"
+        "/report search QUERY               — search report archive (FTS)\n"
         "/report ack [type]                  — acknowledge report as read\n"
         "/report status                      — review state for all reports\n"
         "/control emergency on [min] [reason]  — enable emergency mode\n"
