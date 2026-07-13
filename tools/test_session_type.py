@@ -251,10 +251,53 @@ else:
           "philosophy" in source)
 
 # ===========================================================================
+# Test 10: Recurring slot — days field includes today → matches
+# ===========================================================================
+print("\n[10] Recurring slot — days field includes today")
+with tempfile.TemporaryDirectory() as tmpdir:
+    tmp = Path(tmpdir)
+    (tmp / "config" / "session_types").mkdir(parents=True)
+    slot_str = now.strftime("%H:%M")
+    today_abbr = now.strftime("%a")
+    schedule = make_schedule(recurring=[{
+        "slot": slot_str,
+        "trigger": "nightly",
+        "session_type": "planning",
+        "enabled": True,
+        "days": [today_abbr],
+    }])
+    (tmp / "config" / "session_schedule.json").write_text(json.dumps(schedule))
+    result = run_resolver(tmp, "nightly")
+    check("days includes today → matched", result.get("session_type") == "planning",
+          f"got {result.get('session_type')!r}")
+
+# ===========================================================================
+# Test 11: Recurring slot — days field excludes today → falls through
+# ===========================================================================
+print("\n[11] Recurring slot — days field excludes today")
+with tempfile.TemporaryDirectory() as tmpdir:
+    tmp = Path(tmpdir)
+    (tmp / "config" / "session_types").mkdir(parents=True)
+    slot_str = now.strftime("%H:%M")
+    today_abbr = now.strftime("%a")
+    other_days = [d for d in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] if d != today_abbr]
+    schedule = make_schedule(recurring=[{
+        "slot": slot_str,
+        "trigger": "nightly",
+        "session_type": "maintenance",
+        "enabled": True,
+        "days": other_days[:2],  # two days that are NOT today
+    }])
+    (tmp / "config" / "session_schedule.json").write_text(json.dumps(schedule))
+    result = run_resolver(tmp, "nightly")
+    check("days excludes today → default execution", result.get("session_type") == "execution",
+          f"got {result.get('session_type')!r}")
+
+# ===========================================================================
 # Summary
 # ===========================================================================
 print(f"\n{'=' * 50}")
-total = 9
+total = 11
 if failures:
     print(f"RESULT: {len(failures)} test(s) FAILED — {', '.join(failures)}")
     sys.exit(1)

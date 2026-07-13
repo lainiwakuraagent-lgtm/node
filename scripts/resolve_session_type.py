@@ -107,6 +107,9 @@ def resolve_type(project_dir: Path, trigger_mode: str) -> tuple:
                 continue
             if entry.get("trigger") != trigger_mode:
                 continue
+            days = entry.get("days")
+            if days and now.strftime("%a") not in days:
+                continue
             slot = entry.get("slot", "")
             try:
                 slot_h, slot_m = map(int, slot.split(":"))
