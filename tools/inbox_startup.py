@@ -3,7 +3,8 @@
 inbox_startup.py — Process inbox at execution session start.
 
 Reads unprocessed inbox/pending.json entries and handles each by type:
-  task_request   → creates a Loom task in the active goal
+  task_request   → creates a Loom task in the active goal (status=triage)
+  verified_task  → creates a Loom task pre-approved by Ting (status=ready, tag=verified)
   idea           → appends to memory/work/lain_notes.md
   agent_message  → logs to memory/work/agent_messages.md
   context_update → appends to memory/work/context_updates.md
@@ -59,7 +60,7 @@ def ts_str(ts: int) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
 
-def create_loom_task(content: str, from_: str) -> bool:
+def create_loom_task(content: str, from_: str, status: str = "triage", tags: str = "inbox") -> bool:
     """Create a Loom task. Returns True on success."""
     try:
         result = subprocess.run(
@@ -68,9 +69,9 @@ def create_loom_task(content: str, from_: str) -> bool:
                 "--db", str(LOOM_DB),
                 "task", "add",
                 "--name", content[:80],
-                "--description", f"Inbox task_request from {from_}: {content}",
-                "--tags", "inbox",
-                "--status", "triage",
+                "--description", f"Inbox {tags} from {from_}: {content}",
+                "--tags", tags,
+                "--status", status,
             ],
             capture_output=True, text=True, timeout=15,
             env={"PYTHONPATH": str(Path.home() / "lain" / "loom"), **__import__("os").environ},
@@ -94,6 +95,12 @@ def process_entry(entry: dict, dry_run: bool) -> str:
         ok = create_loom_task(content, from_)
         status = "loom task created" if ok else "loom task FAILED"
         return f"task_request → {status}: {content[:60]}"
+
+    elif etype == "verified_task":
+        # Pre-approved by Ting (orchestrator) — goes straight to ready, not triage
+        ok = create_loom_task(content, from_, status="ready", tags="inbox,verified")
+        status = "loom task created (ready)" if ok else "loom task FAILED"
+        return f"verified_task → {status}: {content[:60]}"
 
     elif etype == "idea":
         note = f"\n---\n[{ts_str(ts)}] from={from_}\n{content}\n"
