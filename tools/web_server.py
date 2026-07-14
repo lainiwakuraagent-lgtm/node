@@ -44,7 +44,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
 
@@ -62,6 +62,7 @@ LOOM_SRC = pathlib.Path.home() / "lain" / "loom"
 LOOM_DB = pathlib.Path.home() / ".local" / "share" / "loom" / "loom.db"
 ANALYTICS_DB = LOGS_DIR / "analytics.db"
 SESSION_LOG_CSV = LOGS_DIR / "session_log.csv"
+SCHEDULE_FILE = STATE_DIR / "schedule.json"
 
 # ---------------------------------------------------------------------------
 # Helpers — state / config
@@ -685,6 +686,54 @@ def _get_comms() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# API — /api/schedule
+# ---------------------------------------------------------------------------
+
+_DEFAULT_NIGHT_SLOTS = [
+    {"time": "23:00", "duration": 90},
+    {"time": "01:10", "duration": 75},
+    {"time": "02:25", "duration": 75},
+    {"time": "03:40", "duration": 75},
+    {"time": "04:55", "duration": 60},
+]
+
+
+def _default_schedule_entries() -> list:
+    return [
+        {
+            "id": i + 1,
+            "label": "nightly",
+            "type": "execution",
+            "time": s["time"],
+            "duration": s["duration"],
+            "recurrence": "daily",
+            "days": None,
+            "date": None,
+        }
+        for i, s in enumerate(_DEFAULT_NIGHT_SLOTS)
+    ]
+
+
+def _get_schedule() -> dict:
+    if SCHEDULE_FILE.exists():
+        try:
+            entries = json.loads(SCHEDULE_FILE.read_text())
+            return {"entries": entries, "source": "file"}
+        except Exception:
+            pass
+    entries = _default_schedule_entries()
+    return {"entries": entries, "source": "default"}
+
+
+def _save_schedule(entries: list) -> dict:
+    try:
+        SCHEDULE_FILE.write_text(json.dumps(entries, indent=2))
+        return {"ok": True, "count": len(entries)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # API — actions
 # ---------------------------------------------------------------------------
 
@@ -778,11 +827,14 @@ def _read_head(path: pathlib.Path, lines: int = 30) -> str:
         return ""
 
 
+_ui_file = "web_ui.html"  # overridden by --ui-file arg
+
+
 def _load_ui_html() -> str:
-    ui_path = TOOLS_DIR / "web_ui.html"
+    ui_path = TOOLS_DIR / _ui_file
     if ui_path.exists():
         return ui_path.read_text(errors="replace")
-    return "<h1>web_ui.html not found</h1><p>Place web_ui.html in tools/</p>"
+    return f"<h1>{_ui_file} not found</h1><p>Place it in tools/</p>"
 
 
 # ---------------------------------------------------------------------------
@@ -842,6 +894,18 @@ async def comms():
     return _get_comms()
 
 
+@app.get("/api/schedule")
+async def get_schedule():
+    return _get_schedule()
+
+
+@app.post("/api/schedule")
+async def save_schedule(request: Request):
+    body = await request.json()
+    entries = body.get("entries", [])
+    return _save_schedule(entries)
+
+
 @app.post("/api/trigger/manual")
 async def trigger_manual():
     return _trigger_manual()
@@ -876,7 +940,10 @@ def main():
     parser.add_argument("--host", default="0.0.0.0", help="Bind host")
     parser.add_argument("--port", type=int, default=8767, help="Port (default: 8767)")
     parser.add_argument("--reload", action="store_true", help="Auto-reload on file changes")
+    parser.add_argument("--ui-file", default="web_ui.html", help="HTML file to serve from tools/ (default: web_ui.html)")
     args = parser.parse_args()
+    global _ui_file
+    _ui_file = args.ui_file
 
     print(f"[web_server] Starting on http://{args.host}:{args.port}")
     print(f"[web_server] Project: {PROJECT_DIR}")
