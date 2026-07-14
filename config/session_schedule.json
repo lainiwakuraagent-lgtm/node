@@ -4,36 +4,36 @@
     {
       "slot": "23:00",
       "trigger": "nightly",
-      "session_type": "execution",
-      "label": "Primary execution window — first session",
+      "session_type": "planning",
+      "label": "Open the night — scope work, check direction, set the plan",
       "enabled": true
     },
     {
       "slot": "01:10",
       "trigger": "nightly",
       "session_type": "execution",
-      "label": "Second execution session",
+      "label": "First execution block — post-reset, primary work",
       "enabled": true
     },
     {
       "slot": "02:25",
       "trigger": "nightly",
-      "session_type": "planning",
-      "label": "Mid-night strategic review",
+      "session_type": "execution",
+      "label": "Second execution block — continue or complete",
       "enabled": true
     },
     {
       "slot": "03:40",
       "trigger": "nightly",
-      "session_type": "execution",
-      "label": "Post-planning execution",
+      "session_type": "maintenance",
+      "label": "Audit the night — what broke, what was missed, produce report",
       "enabled": true
     },
     {
       "slot": "04:55",
       "trigger": "nightly",
-      "session_type": "maintenance",
-      "label": "Late-window cleanup and system health",
+      "session_type": "reflection",
+      "label": "Close the night — integrate, identity check, update summary",
       "enabled": true
     }
   ],
