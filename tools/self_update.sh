@@ -35,6 +35,8 @@ ALLOWLIST=(
   "tools/analytics_write.py"
   "tools/session_trigger_server.py"
   "tools/self_update.sh"
+  "tools/web_server.py"
+  "tools/web_ui.html"
   "scripts/conversation.sh"
   "scripts/conversation.service"
   "prompts/wrapper_prompt.md"
