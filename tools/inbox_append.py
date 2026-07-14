@@ -25,7 +25,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 INBOX_FILE = PROJECT_DIR / "inbox" / "pending.json"
 
-VALID_TYPES = {"task_request", "idea", "agent_message", "context_update"}
+VALID_TYPES = {"task_request", "idea", "agent_message", "context_update", "file_delivery"}
 
 
 def load_inbox() -> list:

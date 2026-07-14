@@ -8,6 +8,7 @@ Reads unprocessed inbox/pending.json entries and handles each by type:
   idea           → appends to memory/work/lain_notes.md
   agent_message  → logs to memory/work/agent_messages.md
   context_update → appends to memory/work/context_updates.md
+  file_delivery  → creates a Loom task with file path and caption
 
 Marks all processed entries as processed after handling.
 Prints a human-readable summary for session briefing.
@@ -116,6 +117,14 @@ def process_entry(entry: dict, dry_run: bool) -> str:
         note = f"\n[{ts_str(ts)}] from={from_}\n{content}\n"
         append_to_file(CONTEXT_UPDATES, note)
         return f"context_update → applied: {content[:60]}"
+
+    elif etype == "file_delivery":
+        file_path = entry.get("file_path", "unknown")
+        file_name = entry.get("file_name", "unknown")
+        task_desc = f"File from {from_}: {file_name} at {file_path} — {content}"
+        ok = create_loom_task(task_desc[:80], from_, status="triage", tags="inbox,file")
+        status = "loom task created" if ok else "loom task FAILED"
+        return f"file_delivery → {status}: {file_name} ({content[:40]})"
 
     else:
         return f"unknown type '{etype}' — skipped"

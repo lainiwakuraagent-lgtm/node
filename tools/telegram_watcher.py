@@ -48,6 +48,9 @@ LONG_POLL_TIMEOUT = 25
 # Retry delay on network error
 RETRY_DELAY = 3
 
+INBOX_FILES_DIR = PROJECT_DIR / "inbox" / "files"
+INBOX_FILE = PROJECT_DIR / "inbox" / "pending.json"
+
 
 def _parse_env_file(path: Path) -> dict[str, str]:
     """Parse a key=value env file, skipping comments."""
@@ -260,6 +263,94 @@ def forward_outbox() -> None:
             print(f"outbox write error: {e}", file=sys.stderr)
 
 
+def _get_file_path(token: str, file_id: str) -> tuple[str, str]:
+    """Call getFile API — returns (tg_file_path, filename)."""
+    url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+    with urllib.request.urlopen(urllib.request.Request(url), timeout=30) as resp:
+        data = json.loads(resp.read())
+    if not data.get("ok"):
+        raise RuntimeError(f"getFile error: {data}")
+    tg_path = data["result"]["file_path"]
+    filename = tg_path.split("/")[-1]
+    return tg_path, filename
+
+
+def _download_file(token: str, tg_path: str) -> bytes:
+    """Download file bytes from Telegram CDN."""
+    url = f"https://api.telegram.org/file/bot{token}/{tg_path}"
+    with urllib.request.urlopen(urllib.request.Request(url), timeout=60) as resp:
+        return resp.read()
+
+
+def _save_inbox_file(content: bytes, filename: str, caption: str, file_type: str, mime_type: str, ts: int, from_: str) -> str:
+    """Save file to inbox/files/, append manifest entry to pending.json. Returns relative path."""
+    INBOX_FILES_DIR.mkdir(parents=True, exist_ok=True)
+    dest = INBOX_FILES_DIR / f"{ts}_{filename}"
+    dest.write_bytes(content)
+    rel_path = str(dest.relative_to(PROJECT_DIR))
+
+    entry = {
+        "source": "telegram",
+        "from": from_,
+        "content": caption if caption else f"[file: {filename}, no caption]",
+        "timestamp": ts,
+        "type": "file_delivery",
+        "file_path": rel_path,
+        "file_name": filename,
+        "file_type": file_type,
+        "mime_type": mime_type,
+        "processed": False,
+    }
+
+    entries: list = []
+    if INBOX_FILE.exists():
+        try:
+            entries = json.loads(INBOX_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            entries = []
+    entries.append(entry)
+    tmp = INBOX_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(entries, indent=2))
+    tmp.rename(INBOX_FILE)
+    return rel_path
+
+
+def handle_file_message(token: str, msg: dict, allowed_chat: str) -> None:
+    """Handle a Telegram photo or document message — download and queue in inbox."""
+    chat_id = str(msg.get("chat", {}).get("id", ""))
+    if allowed_chat and chat_id != allowed_chat:
+        return
+
+    ts = msg.get("date", int(time.time()))
+    from_ = msg.get("from", {}).get("username", "unknown")
+    caption = msg.get("caption", "")
+
+    photo = msg.get("photo")
+    document = msg.get("document")
+
+    if photo:
+        # photo is an array sorted by size; last entry = largest
+        largest = photo[-1]
+        file_id = largest["file_id"]
+        file_type = "photo"
+        mime_type = "image/jpeg"
+        tg_path, filename = _get_file_path(token, file_id)
+    elif document:
+        file_id = document["file_id"]
+        file_type = "document"
+        mime_type = document.get("mime_type", "application/octet-stream")
+        tg_path, filename = _get_file_path(token, file_id)
+        # Prefer Telegram's file_name field (preserves original name)
+        if document.get("file_name"):
+            filename = document["file_name"]
+    else:
+        return
+
+    data = _download_file(token, tg_path)
+    rel_path = _save_inbox_file(data, filename, caption, file_type, mime_type, ts, from_)
+    print(f"inbox: file saved — {rel_path} ({len(data)} bytes, caption={caption!r})", file=sys.stderr)
+
+
 def dispatch_command(text: str) -> None:
     """Handle a /command: dispatch via command_dispatcher.py, send response via telegram_send.sh.
 
@@ -330,7 +421,14 @@ def main() -> int:
                 continue
 
             text = msg.get("text", "")
+
             if not text:
+                # Handle file messages (photo/document) — queue to inbox, keep polling
+                if msg.get("photo") or msg.get("document"):
+                    try:
+                        handle_file_message(token, msg, allowed_chat)
+                    except Exception as e:
+                        print(f"file message error: {e}", file=sys.stderr)
                 continue
 
             # Filter to allowed chat only

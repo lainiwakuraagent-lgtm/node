@@ -44,3 +44,5 @@ tools/__pycache__/
 # Venv
 .venv/
 __pycache__/
+inbox/files/*
+!inbox/files/.gitkeep
