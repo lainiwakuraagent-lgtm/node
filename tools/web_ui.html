@@ -1213,6 +1213,68 @@ body {
 .rel-meta-item { display: flex; flex-direction: column; gap: 2px; }
 .rel-meta-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
 .rel-meta-value { font-size: 12px; color: var(--text-bright); font-weight: 600; }
+
+/* ── Session Types tab ──────────────────────────────────────────────── */
+.types-container {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px; height: 100%; overflow-y: auto;
+}
+.types-container::-webkit-scrollbar { width: 3px; }
+.types-container::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+.types-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px;
+}
+.type-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px; cursor: pointer; transition: border-color 0.14s;
+}
+.type-card:hover { border-color: var(--accent); }
+.type-card-name { font-size: 12px; color: var(--text-bright); font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.type-card-id { font-size: 9px; color: var(--text-dim); letter-spacing: 0.06em; text-transform: uppercase; }
+.type-panel-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 199; }
+.type-panel-backdrop.open { display: block; }
+.types-panel {
+  position: fixed; right: -440px; top: 0; width: 440px; height: 100vh;
+  background: var(--bg2); border-left: 1px solid var(--border2);
+  display: flex; flex-direction: column; z-index: 200;
+  transition: right 0.2s ease;
+}
+.types-panel.open { right: 0; }
+.types-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.types-panel-title { font-size: 12px; color: var(--text-bright); font-weight: 600; }
+.types-panel-body { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.types-yaml-editor {
+  flex: 1; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text); font-family: monospace;
+  font-size: 10px; line-height: 1.5; padding: 10px; resize: none; outline: none;
+  min-height: 360px;
+}
+.types-yaml-editor:focus { border-color: var(--accent); }
+.type-panel-actions { display: flex; gap: 8px; padding-top: 4px; flex-shrink: 0; }
+
+/* Nightly schedule section */
+.nightly-slots {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 4px;
+}
+.nightly-slots-head {
+  padding: 8px 12px; font-size: 9px; color: var(--text-dim);
+  letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--border);
+}
+.nightly-slot-row {
+  display: grid; grid-template-columns: 50px 1fr auto; gap: 8px; align-items: center;
+  padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 11px;
+}
+.nightly-slot-row:last-child { border-bottom: none; }
+.nightly-slot-time { color: var(--text-dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+.nightly-slot-label { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nightly-type-select {
+  font-size: 9px; background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text); border-radius: 3px; padding: 2px 6px; cursor: pointer; outline: none;
+}
+.nightly-type-select:focus { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -1233,6 +1295,7 @@ body {
       <button class="tab" data-tab="analytics">analytics</button>
       <button class="tab" data-tab="tasks">tasks</button>
       <button class="tab" data-tab="relationship">relationship</button>
+      <button class="tab" data-tab="types">types</button>
     </nav>
     <div class="header-status">
       <div class="refresh-area">
@@ -1382,6 +1445,12 @@ body {
     <div class="tab-view" id="tab-schedule">
       <div class="sched-container">
 
+        <!-- Nightly recurring slots — controls config/session_schedule.json -->
+        <div class="nightly-slots" id="nightlySlotsSection">
+          <div class="nightly-slots-head">nightly recurring slots</div>
+          <div id="nightlySlotsBody"><div style="padding:12px;color:var(--text-dim);font-size:11px">loading…</div></div>
+        </div>
+
         <!-- Toolbar -->
         <div class="sched-toolbar">
           <div class="sched-nav">
@@ -1440,12 +1509,11 @@ body {
             <div class="field-group">
               <label>type</label>
               <select id="pType">
+                <!-- dynamically populated from /api/session-types -->
                 <option value="execution">execution</option>
                 <option value="planning">planning</option>
-                <option value="philosophizing">philosophizing</option>
                 <option value="maintenance">maintenance</option>
                 <option value="free">free</option>
-                <option value="emergency">emergency</option>
               </select>
             </div>
 
@@ -1606,7 +1674,38 @@ body {
       </div>
     </div>
 
+    <!-- ── Session Types tab ────────────────────────────────────────── -->
+    <div class="tab-view" id="tab-types">
+      <div class="types-container">
+        <div class="types-grid" id="typesGrid">
+          <div style="color:var(--text-dim);font-size:11px">loading…</div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /content-area -->
+
+  <!-- Types editor panel -->
+  <div class="type-panel-backdrop" id="typePanelBackdrop"></div>
+  <div class="types-panel" id="typesPanel">
+    <div class="types-panel-head">
+      <span class="types-panel-title" id="typesPanelTitle">edit type</span>
+      <button class="panel-close" id="typesPanelClose">✕</button>
+    </div>
+    <div class="types-panel-body">
+      <input type="hidden" id="typesEditingId">
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:2px">
+        editing <code style="color:var(--accent)" id="typesEditingPath"></code>
+      </div>
+      <textarea class="types-yaml-editor" id="typesYamlEditor" spellcheck="false"></textarea>
+      <div class="type-panel-actions">
+        <button class="btn btn-primary" id="typesSaveBtn">save</button>
+        <button class="btn btn-ghost" id="typesCancelBtn">cancel</button>
+        <span class="field-note" id="typesSaveStatus" style="margin-left:auto;font-size:10px;align-self:center"></span>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /node-card -->
 
 <script>
@@ -2683,6 +2782,189 @@ async function loadRelationship() {
 document.querySelector('.tab[data-tab="relationship"]').addEventListener('click', () => {
   setTimeout(() => loadRelationship(), 0);
 }, { once: true });
+
+// ════════════════════════════════════════
+// SESSION TYPES (T47)
+// ════════════════════════════════════════
+
+let sessionTypesCache = [];
+
+const TYPE_CARD_COLORS = Object.assign({}, TYPE_COLORS, {
+  reflection:  '#a0c4e8',
+  philosophy:  '#c78af0',
+});
+
+async function loadSessionTypes() {
+  try {
+    const data = await fetch('/api/session-types').then(r => r.json());
+    sessionTypesCache = data.types || [];
+    renderTypesGrid();
+    populateTypeDropdowns();
+  } catch(e) {
+    console.warn('session types load failed:', e);
+  }
+}
+
+function renderTypesGrid() {
+  const grid = document.getElementById('typesGrid');
+  if (!sessionTypesCache.length) {
+    grid.innerHTML = '<div style="color:var(--text-dim);font-size:11px">no session types found in config/session_types/</div>';
+    return;
+  }
+  grid.innerHTML = sessionTypesCache.map(t => {
+    const col = TYPE_CARD_COLORS[t.id] || '#666680';
+    return `<div class="type-card" onclick="openTypeEditor('${t.id}')">
+      <div class="type-card-name">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0"></span>
+        ${t.name}
+      </div>
+      <div class="type-card-id">${t.id}</div>
+    </div>`;
+  }).join('');
+}
+
+function populateTypeDropdowns() {
+  // Populate schedule panel type select
+  const sel = document.getElementById('pType');
+  if (!sel || !sessionTypesCache.length) return;
+  const current = sel.value;
+  sel.innerHTML = sessionTypesCache.map(t =>
+    `<option value="${t.id}"${t.id === current ? ' selected' : ''}>${t.id}</option>`
+  ).join('');
+  // Also populate nightly slot selects if already rendered
+  document.querySelectorAll('.nightly-type-select').forEach(s => {
+    const v = s.value;
+    s.innerHTML = sessionTypesCache.map(t =>
+      `<option value="${t.id}"${t.id === v ? ' selected' : ''}>${t.id}</option>`
+    ).join('');
+  });
+}
+
+function openTypeEditor(typeId) {
+  const t = sessionTypesCache.find(x => x.id === typeId);
+  if (!t) return;
+  document.getElementById('typesEditingId').value = typeId;
+  document.getElementById('typesPanelTitle').textContent = t.name || typeId;
+  document.getElementById('typesEditingPath').textContent = `config/session_types/${typeId}.yaml`;
+  document.getElementById('typesYamlEditor').value = t.content || '';
+  document.getElementById('typesSaveStatus').textContent = '';
+  document.getElementById('typesPanel').classList.add('open');
+  document.getElementById('typePanelBackdrop').classList.add('open');
+}
+
+function closeTypeEditor() {
+  document.getElementById('typesPanel').classList.remove('open');
+  document.getElementById('typePanelBackdrop').classList.remove('open');
+}
+
+document.getElementById('typesPanelClose').addEventListener('click', closeTypeEditor);
+document.getElementById('typesCancelBtn').addEventListener('click', closeTypeEditor);
+document.getElementById('typePanelBackdrop').addEventListener('click', closeTypeEditor);
+
+document.getElementById('typesSaveBtn').addEventListener('click', async () => {
+  const typeId  = document.getElementById('typesEditingId').value;
+  const content = document.getElementById('typesYamlEditor').value;
+  const status  = document.getElementById('typesSaveStatus');
+  if (!typeId || !content.trim()) return;
+  status.textContent = 'saving…';
+  status.style.color = 'var(--text-dim)';
+  try {
+    const res = await fetch(`/api/session-types/${typeId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    }).then(r => r.json());
+    if (res.ok) {
+      status.textContent = 'saved ✓';
+      status.style.color = 'var(--green)';
+      // Update cache
+      const idx = sessionTypesCache.findIndex(x => x.id === typeId);
+      if (idx >= 0) sessionTypesCache[idx].content = content;
+      setTimeout(() => { status.textContent = ''; }, 2000);
+    } else {
+      status.textContent = 'error';
+      status.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    status.textContent = 'error';
+    status.style.color = 'var(--red)';
+    console.warn('save type failed:', e);
+  }
+});
+
+document.querySelector('.tab[data-tab="types"]').addEventListener('click', () => {
+  if (!sessionTypesCache.length) loadSessionTypes();
+}, { once: true });
+
+// ════════════════════════════════════════
+// NIGHTLY SCHEDULE (T48)
+// ════════════════════════════════════════
+
+let nightlyScheduleCache = null;
+
+async function loadNightlySchedule() {
+  try {
+    const data = await fetch('/api/nightly-schedule').then(r => r.json());
+    nightlyScheduleCache = data;
+    renderNightlySlots();
+  } catch(e) {
+    console.warn('nightly schedule load failed:', e);
+    document.getElementById('nightlySlotsBody').innerHTML =
+      '<div style="padding:10px 12px;color:var(--text-dim);font-size:11px">unavailable</div>';
+  }
+}
+
+function renderNightlySlots() {
+  const body = document.getElementById('nightlySlotsBody');
+  if (!nightlyScheduleCache) return;
+  const slots = nightlyScheduleCache.recurring || [];
+  if (!slots.length) {
+    body.innerHTML = '<div style="padding:10px 12px;color:var(--text-dim);font-size:11px">no recurring slots defined</div>';
+    return;
+  }
+  body.innerHTML = slots.map((s, i) => {
+    const opts = sessionTypesCache.length
+      ? sessionTypesCache.map(t => `<option value="${t.id}"${t.session_type === s.session_type ? ' selected' : ''}>${t.id}</option>`).join('')
+      : `<option value="${s.session_type || ''}" selected>${s.session_type || 'unknown'}</option>`;
+    return `<div class="nightly-slot-row">
+      <span class="nightly-slot-time">${s.slot || '—'}</span>
+      <span class="nightly-slot-label" title="${s.label || ''}">${s.label || s.session_type || '—'}</span>
+      <select class="nightly-type-select" data-slot-idx="${i}" onchange="setNightlySlotType(${i}, this.value)">
+        ${opts}
+      </select>
+    </div>`;
+  }).join('');
+  // Set correct selected values after render
+  slots.forEach((s, i) => {
+    const sel = body.querySelector(`[data-slot-idx="${i}"]`);
+    if (sel) sel.value = s.session_type || '';
+  });
+  // If types are loaded, update selects with all options
+  if (sessionTypesCache.length) populateTypeDropdowns();
+}
+
+async function setNightlySlotType(idx, newType) {
+  if (!nightlyScheduleCache) return;
+  nightlyScheduleCache.recurring[idx].session_type = newType;
+  try {
+    await fetch('/api/nightly-schedule', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(nightlyScheduleCache),
+    });
+  } catch(e) {
+    console.warn('nightly schedule save failed:', e);
+  }
+}
+
+// Load nightly schedule when schedule tab first opened
+document.querySelector('.tab[data-tab="schedule"]').addEventListener('click', () => {
+  loadNightlySchedule();
+  if (!sessionTypesCache.length) loadSessionTypes();
+}, { once: true });
+
+// Initial load of session types (for pType dropdown)
+loadSessionTypes();
 </script>
 </body>
 </html>

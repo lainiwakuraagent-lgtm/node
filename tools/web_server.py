@@ -30,6 +30,10 @@ Endpoints:
   POST /api/emergency/disable  → disable emergency mode
   POST /api/health/run         → run health_check.sh and return result
   POST /api/usage/check        → run check_usage.sh and return result
+  GET  /api/session-types      → list session type definitions (config/session_types/*.yaml)
+  PUT  /api/session-types/{id} → save a session type YAML
+  GET  /api/nightly-schedule   → read real nightly schedule (config/session_schedule.json)
+  PUT  /api/nightly-schedule   → write real nightly schedule
 """
 
 import argparse
@@ -64,6 +68,9 @@ LOOM_DB = pathlib.Path.home() / ".local" / "share" / "loom" / "loom.db"
 ANALYTICS_DB = LOGS_DIR / "analytics.db"
 SESSION_LOG_CSV = LOGS_DIR / "session_log.csv"
 SCHEDULE_FILE = STATE_DIR / "schedule.json"
+CONFIGS_DIR = PROJECT_DIR / "config"
+SESSION_TYPES_DIR = CONFIGS_DIR / "session_types"
+NIGHTLY_SCHEDULE_FILE = CONFIGS_DIR / "session_schedule.json"
 
 # ---------------------------------------------------------------------------
 # Helpers — state / config
@@ -735,6 +742,47 @@ def _save_schedule(entries: list) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Session types — read/write config/session_types/*.yaml
+# ---------------------------------------------------------------------------
+
+def _get_session_types() -> list:
+    types = []
+    if SESSION_TYPES_DIR.exists():
+        for f in sorted(SESSION_TYPES_DIR.glob("*.yaml")):
+            content = f.read_text()
+            name_m = re.search(r'^name:\s*["\']?(.+?)["\']?\s*$', content, re.MULTILINE)
+            name = name_m.group(1).strip().strip('"\'') if name_m else f.stem
+            types.append({"id": f.stem, "name": name, "content": content})
+    return types
+
+
+def _save_session_type(type_id: str, content: str) -> dict:
+    if not re.match(r'^[a-z0-9_-]+$', type_id):
+        raise HTTPException(status_code=400, detail="invalid type id — use [a-z0-9_-] only")
+    SESSION_TYPES_DIR.mkdir(parents=True, exist_ok=True)
+    (SESSION_TYPES_DIR / f"{type_id}.yaml").write_text(content)
+    return {"ok": True, "id": type_id}
+
+
+def _get_nightly_schedule() -> dict:
+    if NIGHTLY_SCHEDULE_FILE.exists():
+        try:
+            return json.loads(NIGHTLY_SCHEDULE_FILE.read_text())
+        except Exception:
+            pass
+    return {"version": 1, "recurring": [], "one_off": []}
+
+
+def _save_nightly_schedule(data: dict) -> dict:
+    try:
+        CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
+        NIGHTLY_SCHEDULE_FILE.write_text(json.dumps(data, indent=2))
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # API — actions
 # ---------------------------------------------------------------------------
 
@@ -949,6 +997,29 @@ async def check_usage():
     return _check_usage()
 
 
+@app.get("/api/session-types")
+async def get_session_types():
+    return {"types": _get_session_types()}
+
+
+@app.put("/api/session-types/{type_id}")
+async def save_session_type(type_id: str, request: Request):
+    body = await request.json()
+    content = str(body.get("content", ""))
+    return _save_session_type(type_id, content)
+
+
+@app.get("/api/nightly-schedule")
+async def get_nightly_schedule():
+    return _get_nightly_schedule()
+
+
+@app.put("/api/nightly-schedule")
+async def save_nightly_schedule(request: Request):
+    body = await request.json()
+    return _save_nightly_schedule(body)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -962,7 +1033,7 @@ def main():
     parser.add_argument("--project-dir", default=None, help="Override project root (default: auto-detected from script location)")
     args = parser.parse_args()
 
-    global _ui_file, PROJECT_DIR, STATE_DIR, LOGS_DIR, TOOLS_DIR, MEMORY_DIR, SCRIPTS_DIR, ANALYTICS_DB, SESSION_LOG_CSV, SCHEDULE_FILE
+    global _ui_file, PROJECT_DIR, STATE_DIR, LOGS_DIR, TOOLS_DIR, MEMORY_DIR, SCRIPTS_DIR, ANALYTICS_DB, SESSION_LOG_CSV, SCHEDULE_FILE, CONFIGS_DIR, SESSION_TYPES_DIR, NIGHTLY_SCHEDULE_FILE
     _ui_file = args.ui_file
     if args.project_dir:
         PROJECT_DIR = pathlib.Path(args.project_dir).resolve()
@@ -974,6 +1045,9 @@ def main():
         ANALYTICS_DB = LOGS_DIR / "analytics.db"
         SESSION_LOG_CSV = LOGS_DIR / "session_log.csv"
         SCHEDULE_FILE = STATE_DIR / "schedule.json"
+        CONFIGS_DIR = PROJECT_DIR / "config"
+        SESSION_TYPES_DIR = CONFIGS_DIR / "session_types"
+        NIGHTLY_SCHEDULE_FILE = CONFIGS_DIR / "session_schedule.json"
 
     print(f"[web_server] Starting on http://{args.host}:{args.port}")
     print(f"[web_server] Project: {PROJECT_DIR}")
