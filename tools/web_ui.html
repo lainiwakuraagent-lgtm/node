@@ -2924,7 +2924,7 @@ function renderNightlySlots() {
   }
   body.innerHTML = slots.map((s, i) => {
     const opts = sessionTypesCache.length
-      ? sessionTypesCache.map(t => `<option value="${t.id}"${t.session_type === s.session_type ? ' selected' : ''}>${t.id}</option>`).join('')
+      ? sessionTypesCache.map(t => `<option value="${t.id}"${t.id === s.session_type ? ' selected' : ''}>${t.id}</option>`).join('')
       : `<option value="${s.session_type || ''}" selected>${s.session_type || 'unknown'}</option>`;
     return `<div class="nightly-slot-row">
       <span class="nightly-slot-time">${s.slot || '—'}</span>
