@@ -49,7 +49,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
 
 # ---------------------------------------------------------------------------
-# Project root — auto-detected from this file's location
+# Project root — auto-detected from this file's location, or overridden via
+# --project-dir CLI argument (updated in main() before any request handling).
 # ---------------------------------------------------------------------------
 PROJECT_DIR = pathlib.Path(__file__).resolve().parent.parent
 STATE_DIR = PROJECT_DIR / "state"
@@ -737,19 +738,22 @@ def _save_schedule(entries: list) -> dict:
 # API — actions
 # ---------------------------------------------------------------------------
 
-def _trigger_manual() -> dict:
+def _trigger_manual(session_type: str = "") -> dict:
     wake_sh = SCRIPTS_DIR / "wake.sh"
     if not wake_sh.exists():
         raise HTTPException(status_code=500, detail="wake.sh not found")
     try:
+        extra_env: dict = {"TRIGGER_MODE": "manual"}
+        if session_type:
+            extra_env["SESSION_TYPE"] = session_type
         proc = subprocess.Popen(
             ["bash", str(wake_sh)],
-            env={**os.environ, "TRIGGER_MODE": "manual"},
+            env={**os.environ, **extra_env},
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        return {"launched": True, "pid": proc.pid}
+        return {"launched": True, "pid": proc.pid, "session_type": session_type or "auto"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -805,9 +809,18 @@ def _check_usage() -> dict:
     parsed: dict = {"raw": output}
     for line in output.splitlines():
         if "utilization_5h:" in line:
-            parsed["utilization_5h"] = line.split(":", 1)[1].strip()
+            # Extract just the float (e.g. "0.16  (status: ...)" → 0.16)
+            val_str = line.split(":", 1)[1].strip().split()[0]
+            try:
+                parsed["utilization_5h"] = round(float(val_str) * 100)
+            except ValueError:
+                parsed["utilization_5h"] = 0
         elif "utilization_7d:" in line:
-            parsed["utilization_7d"] = line.split(":", 1)[1].strip()
+            val_str = line.split(":", 1)[1].strip().split()[0]
+            try:
+                parsed["utilization_7d"] = round(float(val_str) * 100)
+            except ValueError:
+                parsed["utilization_7d"] = 0
         elif line.startswith("ACTION:"):
             parsed["action"] = line.split(":", 1)[1].strip()
         elif "usage_check_status:" in line:
@@ -907,8 +920,13 @@ async def save_schedule(request: Request):
 
 
 @app.post("/api/trigger/manual")
-async def trigger_manual():
-    return _trigger_manual()
+async def trigger_manual(request: Request):
+    try:
+        body = await request.json()
+        session_type = str(body.get("session_type", "")).strip()
+    except Exception:
+        session_type = ""
+    return _trigger_manual(session_type)
 
 
 @app.post("/api/emergency/enable")
@@ -941,9 +959,21 @@ def main():
     parser.add_argument("--port", type=int, default=8767, help="Port (default: 8767)")
     parser.add_argument("--reload", action="store_true", help="Auto-reload on file changes")
     parser.add_argument("--ui-file", default="web_ui.html", help="HTML file to serve from tools/ (default: web_ui.html)")
+    parser.add_argument("--project-dir", default=None, help="Override project root (default: auto-detected from script location)")
     args = parser.parse_args()
-    global _ui_file
+
+    global _ui_file, PROJECT_DIR, STATE_DIR, LOGS_DIR, TOOLS_DIR, MEMORY_DIR, SCRIPTS_DIR, ANALYTICS_DB, SESSION_LOG_CSV, SCHEDULE_FILE
     _ui_file = args.ui_file
+    if args.project_dir:
+        PROJECT_DIR = pathlib.Path(args.project_dir).resolve()
+        STATE_DIR = PROJECT_DIR / "state"
+        LOGS_DIR = PROJECT_DIR / "logs"
+        TOOLS_DIR = PROJECT_DIR / "tools"
+        MEMORY_DIR = PROJECT_DIR / "memory"
+        SCRIPTS_DIR = PROJECT_DIR / "scripts"
+        ANALYTICS_DB = LOGS_DIR / "analytics.db"
+        SESSION_LOG_CSV = LOGS_DIR / "session_log.csv"
+        SCHEDULE_FILE = STATE_DIR / "schedule.json"
 
     print(f"[web_server] Starting on http://{args.host}:{args.port}")
     print(f"[web_server] Project: {PROJECT_DIR}")
