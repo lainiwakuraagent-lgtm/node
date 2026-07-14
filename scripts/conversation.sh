@@ -132,6 +132,9 @@ kill_stale_watcher() {
     fi
 }
 
+# Refresh JWT at script startup (before first loop — may be stale if service just started)
+refresh_nexus_jwt
+
 # --- Auto-restart loop ---
 RESTART_COUNT=0
 while true; do
@@ -157,12 +160,20 @@ while true; do
         cp "$PROMPT_FILE" "$SESSION_PROMPT"
     fi
 
+    # Start background JWT refresher — token expires in ~1h, refresh every 45min
+    ( while true; do sleep 2700; refresh_nexus_jwt; done ) &
+    JWT_REFRESH_PID=$!
+
     # Launch Claude Code in conversation mode
     claude \
         --model "$MODEL" \
         --dangerously-skip-permissions \
         -p "$(cat "$SESSION_PROMPT")" \
         > "$SESSION_OUT" 2> "$SESSION_ERR" || true
+
+    # Stop background refresher now that Claude has exited
+    kill "$JWT_REFRESH_PID" 2>/dev/null || true
+    wait "$JWT_REFRESH_PID" 2>/dev/null || true
 
     rm -f "$SESSION_PROMPT"
 
