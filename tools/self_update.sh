@@ -37,6 +37,9 @@ ALLOWLIST=(
   "tools/self_update.sh"
   "tools/web_server.py"
   "tools/web_ui.html"
+  # NOTE: tools/web_ui_custom.html is intentionally excluded — it is agent-owned
+  # and must never be overwritten by blank_node updates. web_server.py serves
+  # web_ui_custom.html automatically if it exists, falling back to web_ui.html.
   "scripts/conversation.sh"
   "scripts/conversation.service"
   "prompts/wrapper_prompt.md"

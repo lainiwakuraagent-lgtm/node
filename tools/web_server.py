@@ -892,6 +892,12 @@ _ui_file = "web_ui.html"  # overridden by --ui-file arg
 
 
 def _load_ui_html() -> str:
+    # Agent-specific custom UI takes priority over the base web_ui.html.
+    # Create tools/web_ui_custom.html in the agent project to override.
+    # self_update.sh never touches web_ui_custom.html — it is agent-owned.
+    custom_path = TOOLS_DIR / "web_ui_custom.html"
+    if custom_path.exists():
+        return custom_path.read_text(errors="replace")
     ui_path = TOOLS_DIR / _ui_file
     if ui_path.exists():
         return ui_path.read_text(errors="replace")
@@ -953,6 +959,46 @@ async def memory():
 @app.get("/api/comms")
 async def comms():
     return _get_comms()
+
+
+# ---------------------------------------------------------------------------
+# Docs / Diagrams API
+# ---------------------------------------------------------------------------
+
+@app.get("/api/docs")
+async def docs_index():
+    """List all .mmd diagram files from .claude/architecture/ and docs/diagrams/."""
+    search_dirs = [
+        PROJECT_DIR / ".claude" / "architecture",
+        PROJECT_DIR / "docs" / "diagrams",
+    ]
+    files = []
+    for base_dir in search_dirs:
+        if not base_dir.exists():
+            continue
+        for p in sorted(base_dir.rglob("*.mmd")):
+            rel_to_base = p.relative_to(base_dir)
+            category = str(rel_to_base.parent) if str(rel_to_base.parent) != "." else "root"
+            files.append({
+                "path": str(p.relative_to(PROJECT_DIR)),
+                "name": p.stem,
+                "category": category,
+                "source_dir": base_dir.name,
+            })
+    return {"files": files}
+
+
+@app.get("/api/docs/content")
+async def docs_content(path: str):
+    """Return raw .mmd content. path is relative to PROJECT_DIR."""
+    target = (PROJECT_DIR / path).resolve()
+    if not str(target).startswith(str(PROJECT_DIR.resolve())):
+        raise HTTPException(status_code=400, detail="Path outside project dir")
+    if target.suffix != ".mmd":
+        raise HTTPException(status_code=400, detail="Only .mmd files supported")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"path": path, "content": target.read_text(errors="replace")}
 
 
 @app.get("/api/schedule")
