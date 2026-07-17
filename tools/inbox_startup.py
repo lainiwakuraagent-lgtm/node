@@ -156,6 +156,15 @@ def main() -> int:
         save_inbox(entries)
         print(f"inbox: all {len(unprocessed)} entries marked processed")
 
+        # Prune processed entries older than 7 days
+        cutoff = time.time() - 7 * 24 * 3600
+        before = len(entries)
+        entries = [e for e in entries if not (e.get("processed") and e.get("timestamp", 0) < cutoff)]
+        pruned = before - len(entries)
+        if pruned:
+            save_inbox(entries)
+            print(f"inbox: pruned {pruned} processed entries older than 7 days")
+
     return 0
 
 
