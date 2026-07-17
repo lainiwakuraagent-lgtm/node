@@ -140,6 +140,10 @@ RESTART_COUNT=0
 while true; do
     RESTART_COUNT=$((RESTART_COUNT + 1))
     kill_stale_watcher
+    # Clear any stale idle-close signal from a previous session.
+    # Each new session starts with a clean slate — conv_idle_check.py will
+    # write a fresh signal if the session actually goes idle.
+    rm -f "$CONV_DIR/reset_signal.txt"
     refresh_nexus_jwt
     log_line "CONV: Session start #$RESTART_COUNT"
 
