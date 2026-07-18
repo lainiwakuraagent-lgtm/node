@@ -143,8 +143,24 @@ def process_entry(entry: dict, dry_run: bool) -> str:
         return f"file_delivery → {status}: {file_name} ({content[:40]})"
 
     elif etype == "task_comment":
-        task_id = entry.get("task_id", "?")
-        return f"task_comment → acknowledged: task={task_id} from={from_}: {content[:60]}"
+        task_id = entry.get("task_id")
+        text_content = entry.get("text") or content
+        if not task_id or not text_content:
+            return f"task_comment → skipped: missing task_id or text"
+        try:
+            import sqlite3 as _sqlite3
+            import datetime as _dt
+            conn = _sqlite3.connect(str(LOOM_DB))
+            now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            conn.execute(
+                "INSERT INTO task_events (task_id, event_type, new_value, changed_at) VALUES (?, 'comment', ?, ?)",
+                (task_id, text_content, now),
+            )
+            conn.commit()
+            conn.close()
+            return f"task_comment → comment logged on T{task_id}: {text_content[:60]}"
+        except Exception as e:
+            return f"task_comment → DB error ({e}): task={task_id}"
 
     elif etype in ("sop_comment", "sop_change"):
         sop_id = entry.get("sop_id", entry.get("path", "?"))
