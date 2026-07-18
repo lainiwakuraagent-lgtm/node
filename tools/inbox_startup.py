@@ -61,6 +61,22 @@ def ts_str(ts: int) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
 
 
+def normalize_ts(ts) -> float:
+    """Convert timestamp (int/float/ISO string) to Unix float. Returns 0.0 on failure."""
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str):
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except (ValueError, AttributeError):
+            pass
+    return 0.0
+
+
 def create_loom_task(content: str, from_: str, status: str = "triage", tags: str = "inbox") -> bool:
     """Create a Loom task. Returns True on success."""
     try:
@@ -126,6 +142,14 @@ def process_entry(entry: dict, dry_run: bool) -> str:
         status = "loom task created" if ok else "loom task FAILED"
         return f"file_delivery → {status}: {file_name} ({content[:40]})"
 
+    elif etype == "task_comment":
+        task_id = entry.get("task_id", "?")
+        return f"task_comment → acknowledged: task={task_id} from={from_}: {content[:60]}"
+
+    elif etype in ("sop_comment", "sop_change"):
+        sop_id = entry.get("sop_id", entry.get("path", "?"))
+        return f"{etype} → acknowledged: sop={sop_id} from={from_}: {content[:60]}"
+
     else:
         return f"unknown type '{etype}' — skipped"
 
@@ -159,7 +183,7 @@ def main() -> int:
         # Prune processed entries older than 7 days
         cutoff = time.time() - 7 * 24 * 3600
         before = len(entries)
-        entries = [e for e in entries if not (e.get("processed") and e.get("timestamp", 0) < cutoff)]
+        entries = [e for e in entries if not (e.get("processed") and normalize_ts(e.get("timestamp", 0)) < cutoff)]
         pruned = before - len(entries)
         if pruned:
             save_inbox(entries)
