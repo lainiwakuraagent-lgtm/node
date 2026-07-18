@@ -87,10 +87,15 @@ Run these in order, every single wake, before touching the goal:
 5a. **Check for active conversational session**:
    ```bash
    CONV_LOCK="state/conversation.lock"
+   EXIT_REASON="state/conversation/exit_reason.txt"
    CONV_ACTIVE=0
    if [ -f "$CONV_LOCK" ] && kill -0 "$(cat "$CONV_LOCK")" 2>/dev/null; then
-     echo "Conversational session active (PID $(cat "$CONV_LOCK")). Telegram suppressed."
-     CONV_ACTIVE=1
+     if [ -f "$EXIT_REASON" ] && grep -q "idle_close" "$EXIT_REASON" 2>/dev/null; then
+       echo "Conv PID alive but exit_reason=idle_close — slow shutdown in progress. Treating as inactive. Telegram allowed."
+     else
+       echo "Conversational session active (PID $(cat "$CONV_LOCK")). Telegram suppressed."
+       CONV_ACTIVE=1
+     fi
    fi
    ```
    **If CONV_ACTIVE=1**: Do NOT send any unsolicited Telegram messages this session —
