@@ -38,6 +38,25 @@ mkdir -p "$STATE_DIR" "$LOG_DIR"
 timestamp() { date '+%Y-%m-%d %H:%M:%S %Z'; }
 log_line() { echo "[$(timestamp)] $*" >> "$LOG_DIR/wake.log"; }
 
+# --- Log rotation (non-fatal) ---
+# If wake.log exceeds 1MB, rotate it before writing this session's entries.
+# Keeps the last 3 rotated files; older ones are removed automatically.
+{
+  _wake_log="$LOG_DIR/wake.log"
+  _wake_log_size=$(stat -c%s "$_wake_log" 2>/dev/null || echo 0)
+  if [ "$_wake_log_size" -gt 1048576 ]; then
+    _rotated="$LOG_DIR/wake.log.$(date +%Y%m%d_%H%M%S).gz"
+    if gzip -c "$_wake_log" > "$_rotated"; then
+      > "$_wake_log"
+      # Remove all but the 3 most recent rotated files
+      # shellcheck disable=SC2012
+      ls -t "$LOG_DIR"/wake.log.*.gz 2>/dev/null | tail -n +4 | xargs -r rm -f
+      log_line "LOG ROTATED: was $_wake_log_size bytes → $_rotated (keeping last 3)."
+    fi
+  fi
+  unset _wake_log _wake_log_size _rotated
+} || true
+
 # --- Determine trigger mode and select matching counter file ---
 TRIGGER_MODE="${TRIGGER_MODE:-nightly}"
 case "$TRIGGER_MODE" in
