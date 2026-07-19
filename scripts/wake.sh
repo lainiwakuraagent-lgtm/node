@@ -2,9 +2,9 @@
 # wake.sh
 # Invoked by systemd timers or the manual trigger server.
 # Supports three launch modes via TRIGGER_MODE env var:
-#   nightly   (default) — scheduled night sessions, full gate enforcement
-#   emergency           — emergency/daytime mode, time+count gates bypassed
-#   manual              — owner-initiated trigger, time+count gates bypassed
+#   nightly   (default) — scheduled night sessions, window + trigger gate enforcement
+#   emergency           — emergency/daytime mode, window gates bypassed
+#   manual              — owner-initiated trigger, window gates bypassed
 #
 # Usage: wake.sh <goal_file> [persona_file]
 
@@ -14,8 +14,6 @@ PROJECT_DIR="${PROJECT_DIR:-/home/andrii/lain/agent_project}"
 STATE_DIR="$PROJECT_DIR/state"
 LOG_DIR="$PROJECT_DIR/logs"
 WRAPPER_TEMPLATE="$PROJECT_DIR/prompts/wrapper_prompt.md"
-DATE_FILE="$STATE_DIR/sessions_tonight.date"
-MAX_SESSIONS_PER_NIGHT=5
 EMERGENCY_FLAG="$STATE_DIR/emergency_mode.active"
 
 # --- Load agent config (parameterize for new node instances) ---
@@ -57,43 +55,38 @@ log_line() { echo "[$(timestamp)] $*" >> "$LOG_DIR/wake.log"; }
   unset _wake_log _wake_log_size _rotated
 } || true
 
-# --- Determine trigger mode and select matching counter file ---
+# --- Determine trigger mode ---
 TRIGGER_MODE="${TRIGGER_MODE:-nightly}"
 case "$TRIGGER_MODE" in
-  nightly)   COUNT_FILE="$STATE_DIR/sessions_tonight.count" ;;
-  emergency) COUNT_FILE="$STATE_DIR/sessions_emergency.count" ;;
-  manual)    COUNT_FILE="$STATE_DIR/sessions_manual.count" ;;
+  nightly|emergency|manual) ;;
   *)
     log_line "ERROR: unknown TRIGGER_MODE '$TRIGGER_MODE'. Defaulting to nightly."
     TRIGGER_MODE="nightly"
-    COUNT_FILE="$STATE_DIR/sessions_tonight.count"
     ;;
 esac
 
 log_line "Wake called. TRIGGER_MODE=$TRIGGER_MODE"
 
-# --- Nightly only: compute night ID and reset counter on new night ---
-if [ "$TRIGGER_MODE" = "nightly" ]; then
-  hour=$(date +%H); hour=$((10#$hour))
-  if [ "$hour" -lt 6 ]; then
-    night_id=$(date -d "yesterday" +%Y-%m-%d)
-  else
-    night_id=$(date +%Y-%m-%d)
-  fi
-
-  last_recorded_night=""
-  if [ -f "$DATE_FILE" ]; then
-    last_recorded_night=$(cat "$DATE_FILE")
-  fi
-  if [ "$last_recorded_night" != "$night_id" ]; then
-    echo "0" > "$COUNT_FILE"
-    echo "$night_id" > "$DATE_FILE"
-    log_line "New night detected ($night_id). Session counter reset to 0."
-  fi
+# --- Night ID (used for log file naming and Loom session recording) ---
+hour=$(date +%H); hour=$((10#$hour))
+if [ "$hour" -lt 6 ]; then
+  night_id=$(date -d "yesterday" +%Y-%m-%d)
 else
   night_id=$(date +%Y-%m-%d)
 fi
 
+# Session counter — purely informational, no cap enforced.
+COUNT_FILE="$STATE_DIR/sessions_tonight.count"
+DATE_FILE="$STATE_DIR/sessions_tonight.date"
+last_recorded_night=""
+if [ -f "$DATE_FILE" ]; then
+  last_recorded_night=$(cat "$DATE_FILE")
+fi
+if [ "$last_recorded_night" != "$night_id" ]; then
+  echo "0" > "$COUNT_FILE"
+  echo "$night_id" > "$DATE_FILE"
+  log_line "New night detected ($night_id). Session counter reset to 0."
+fi
 current_count=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
 
 # --- Gate 0: subscription usage limits (all modes) ---
@@ -120,28 +113,181 @@ if [ "$TRIGGER_MODE" = "nightly" ]; then
   fi
 fi
 
-# --- Gate 2 (nightly only): time window 23:00–06:00 ---
+# --- Gate 2 (nightly only): window + trigger check from session_schedule.json ---
+# Emergency and manual modes bypass window checks entirely.
 if [ "$TRIGGER_MODE" = "nightly" ]; then
-  time_check_output=$(bash "$PROJECT_DIR/tools/check_time.sh")
-  in_window=$(echo "$time_check_output" | grep '^in_work_window:' | awk '{print $2}')
+  SCHEDULE_FILE="$PROJECT_DIR/config/session_schedule.json"
+  LOCK_FILE_PRE="$STATE_DIR/session.lock"
 
-  if [ "$in_window" != "true" ]; then
-    log_line "ABORT: called outside work window. check_time.sh output:"
-    log_line "$time_check_output"
+  window_result=$(python3 -c "
+import json, sys, os
+from datetime import datetime
+
+schedule_file = sys.argv[1]
+lock_file = sys.argv[2]
+
+try:
+    with open(schedule_file) as f:
+        schedule = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError) as e:
+    print('ERROR: cannot read schedule: ' + str(e), file=sys.stderr)
+    print('LAUNCH: yes')
+    print('WINDOW_TYPE: work')
+    print('decision=launch reason=schedule_unreadable')
+    sys.exit(0)
+
+now = datetime.now()
+now_minutes = now.hour * 60 + now.minute
+now_seconds = now.hour * 3600 + now.minute * 60 + now.second
+
+TRIGGER_TOLERANCE_SEC = 45
+
+def time_to_minutes(t):
+    h, m = map(int, t.split(':'))
+    return h * 60 + m
+
+def time_to_seconds(t):
+    h, m = map(int, t.split(':'))
+    return h * 3600 + m * 60
+
+def in_window(start_str, end_str, now_min):
+    start = time_to_minutes(start_str)
+    end = time_to_minutes(end_str)
+    if start <= end:
+        return start <= now_min < end
+    else:
+        # wraps midnight (e.g., 23:00-05:00)
+        return now_min >= start or now_min < end
+
+# --- Validate: windows must not overlap ---
+enabled_windows = [w for w in schedule.get('windows', []) if w.get('enabled', True)]
+
+def windows_overlap(a, b):
+    \"\"\"Check if two windows overlap. Handles midnight wrapping.\"\"\"
+    a_start = time_to_minutes(a['start'])
+    a_end = time_to_minutes(a['end'])
+    b_start = time_to_minutes(b['start'])
+    b_end = time_to_minutes(b['end'])
+
+    # Normalize to ranges on a 0-2880 timeline (two days) to handle midnight wrap
+    def expand(s, e):
+        if s <= e:
+            return [(s, e)]
+        else:
+            return [(s, 1440), (0, e)]
+
+    a_ranges = expand(a_start, a_end)
+    b_ranges = expand(b_start, b_end)
+
+    for ar in a_ranges:
+        for br in b_ranges:
+            if ar[0] < br[1] and br[0] < ar[1]:
+                return True
+    return False
+
+for i in range(len(enabled_windows)):
+    for j in range(i + 1, len(enabled_windows)):
+        if windows_overlap(enabled_windows[i], enabled_windows[j]):
+            la = enabled_windows[i]['label']
+            lb = enabled_windows[j]['label']
+            print(f'ERROR: overlapping windows: {la} and {lb}', file=sys.stderr)
+            print('LAUNCH: no')
+            print('WINDOW_TYPE: none')
+            print(f'decision=abort reason=overlapping_windows windows={la},{lb}')
+            sys.exit(0)
+
+# Check all enabled windows
+matched_window = None
+matched_type = 'work'
+trigger_hit = False
+consecutive_run = False
+
+for w in enabled_windows:
+    if not in_window(w['start'], w['end'], now_minutes):
+        continue
+    matched_window = w['label']
+    matched_type = w.get('type', 'work')
+
+    # Check triggers within +-45s tolerance
+    for trigger in w.get('triggers', []):
+        trigger_sec = time_to_seconds(trigger)
+        diff = abs(now_seconds - trigger_sec)
+        # Handle midnight wrap for diff
+        if diff > 43200:
+            diff = 86400 - diff
+        if diff <= TRIGGER_TOLERANCE_SEC:
+            trigger_hit = True
+            break
+
+    if not trigger_hit:
+        # Inside window, no trigger match -- consecutive run if no lock
+        if not os.path.exists(lock_file):
+            consecutive_run = True
+    break
+
+# Check one_off entries (+-45s tolerance, creates implicit window)
+one_off_hit = False
+one_off_label = ''
+one_off_type = 'work'
+for entry in schedule.get('one_off', []):
+    if entry.get('fired', True):
+        continue
+    dt_str = entry.get('datetime', '')
+    if not dt_str:
+        continue
+    try:
+        dt = datetime.fromisoformat(dt_str)
+        diff_sec = abs((now - dt.replace(tzinfo=None)).total_seconds())
+        if diff_sec <= TRIGGER_TOLERANCE_SEC:
+            one_off_hit = True
+            one_off_label = entry.get('label', 'unnamed')
+            one_off_type = entry.get('type', 'work')
+            # Mark as fired
+            entry['fired'] = True
+            tmp = schedule_file + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(schedule, f, indent=2)
+            os.replace(tmp, schedule_file)
+            break
+    except (ValueError, TypeError):
+        continue
+
+if trigger_hit:
+    print('LAUNCH: yes')
+    print(f'WINDOW_TYPE: {matched_type}')
+    print(f'decision=launch reason=trigger_match window={matched_window}')
+elif one_off_hit:
+    print('LAUNCH: yes')
+    print(f'WINDOW_TYPE: {one_off_type}')
+    print(f'decision=launch reason=one_off_match label={one_off_label}')
+elif consecutive_run:
+    print('LAUNCH: yes')
+    print(f'WINDOW_TYPE: {matched_type}')
+    print(f'decision=launch reason=consecutive_run window={matched_window}')
+elif matched_window:
+    # Inside window but lock exists -- another session is running
+    print('LAUNCH: no')
+    print(f'WINDOW_TYPE: {matched_type}')
+    print(f'decision=skip reason=inside_window_but_locked window={matched_window}')
+else:
+    print('LAUNCH: no')
+    print('WINDOW_TYPE: none')
+    print('decision=skip reason=outside_all_windows')
+" "$SCHEDULE_FILE" "$LOCK_FILE_PRE" 2>&1)
+
+  log_line "Window check result: $window_result"
+
+  window_launch=$(echo "$window_result" | grep '^LAUNCH:' | head -1 | awk '{print $2}')
+  WINDOW_TYPE=$(echo "$window_result" | grep '^WINDOW_TYPE:' | head -1 | awk '{print $2}')
+  export WINDOW_TYPE
+  log_line "Window type: $WINDOW_TYPE"
+
+  if [ "$window_launch" != "yes" ]; then
+    log_line "ABORT: window gate denied launch. $window_result"
     exit 0
   fi
 else
-  log_line "Gate 2 (time window) skipped — TRIGGER_MODE=$TRIGGER_MODE."
-fi
-
-# --- Gate 3 (nightly only): session count hard cap ---
-if [ "$TRIGGER_MODE" = "nightly" ]; then
-  if [ "$current_count" -ge "$MAX_SESSIONS_PER_NIGHT" ]; then
-    log_line "ABORT: already had $current_count session(s) tonight (max $MAX_SESSIONS_PER_NIGHT). Skipping."
-    exit 0
-  fi
-else
-  log_line "Gate 3 (session count) informational — TRIGGER_MODE=$TRIGGER_MODE, current count: $current_count."
+  log_line "Gate 2 (window check) skipped — TRIGGER_MODE=$TRIGGER_MODE."
 fi
 
 # --- Gate 4: no session already running (all modes) ---
@@ -156,6 +302,23 @@ if [ -f "$LOCK_FILE" ]; then
     rm -f "$LOCK_FILE"
   fi
 fi
+
+# --- Pre-launch: clean up any stale temp files from crashed previous sessions ---
+# The lock gate above confirms no session is running, so leftover temps are safe to remove.
+for _stale_pattern in \
+    "$STATE_DIR/session_prompt.*.md" \
+    "$STATE_DIR/augmented_goal.*.md" \
+    "$STATE_DIR/conv_prompt.*.md" \
+    "$STATE_DIR/session_type_result.*.json"; do
+  # shellcheck disable=SC2086
+  _stale_count=$(ls $_stale_pattern 2>/dev/null | wc -l; exit 0)
+  if [ "$_stale_count" -gt 0 ]; then
+    # shellcheck disable=SC2086
+    rm -f $_stale_pattern
+    log_line "Cleaned up $_stale_count stale temp file(s) matching $(basename "$_stale_pattern")."
+  fi
+done
+unset _stale_pattern _stale_count
 
 # --- All gates passed: launch the agent ---
 new_count=$((current_count + 1))
@@ -182,8 +345,8 @@ else
   persona_arg=""
 fi
 
-# --- Session type resolution (Tasks 37/38) ---
-# Priority: SESSION_TYPE env var → session_schedule.json one_off → recurring → default
+# --- Session type resolution ---
+# Priority: SESSION_TYPE env var → Loom queue state → default (maintenance)
 # Resolves type, loads type config YAML, assembles context files + type prompt.
 SESSION_TYPE_RESULT=$(mktemp "$STATE_DIR/session_type_result.XXXXXX.json")
 if [ -f "$PROJECT_DIR/scripts/resolve_session_type.py" ]; then
@@ -251,7 +414,7 @@ if [ -d "$LOOM_SRC" ] && [ -f "$LOOM_SRC/.venv/bin/python" ]; then
 
   # Detect active goal from DB (python3 — sqlite3 CLI not available on this machine).
   ACTIVE_GOAL_ID=$(python3 -c \
-    "import sqlite3,sys; c=sqlite3.connect('$LOOM_DB'); r=c.execute(\"SELECT id FROM goals WHERE status='active' LIMIT 1\").fetchone(); print(r[0] if r else '')" \
+    "import sqlite3,sys; c=sqlite3.connect('$LOOM_DB'); r=c.execute(\"SELECT id FROM goals WHERE status IN ('scheduled','in_progress') ORDER BY priority DESC LIMIT 1\").fetchone(); print(r[0] if r else '')" \
     2>/dev/null || echo "")
   GOAL_ARG=""
   if [ -n "$ACTIVE_GOAL_ID" ]; then
@@ -279,12 +442,6 @@ fi
 
 # Record count BEFORE launching — counts even if agent crashes or hangs.
 echo "$new_count" > "$COUNT_FILE"
-
-# For nightly: write max so the wrapper prompt can compare count vs max.
-# For emergency/manual: no max file — count is informational only.
-if [ "$TRIGGER_MODE" = "nightly" ]; then
-  echo "$MAX_SESSIONS_PER_NIGHT" > "$STATE_DIR/sessions_tonight.max"
-fi
 
 # Write trigger mode so Lain can read it during orientation.
 echo "$TRIGGER_MODE" > "$STATE_DIR/trigger_mode.txt"

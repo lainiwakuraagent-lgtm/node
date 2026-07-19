@@ -26,7 +26,7 @@ Supported commands:
   /reset               Signal conversational session to wrap up and restart
   /new                 Same as /reset but as a clean start (no problem implied)
   /voice on|off        Toggle Fish Audio TTS mode
-  /report [session|milestone|digest]  Surface latest report, mark as delivered
+  /report [session|milestone|digest|recap]  Surface latest report, mark as delivered
   /report ack [type]                  Acknowledge (mark as read)
   /report status                      Review state for all report types
   /report search QUERY                FTS search across all historical reports
@@ -117,6 +117,7 @@ _REPORT_FILE_MAP = {
     "session": "session_report.md",
     "milestone": "milestone_report.md",
     "digest": "daily_digest.md",
+    "recap": "recap.md",
 }
 
 
@@ -572,7 +573,7 @@ def cmd_report(args):
 
     # ── /report [type] — deliver ──
     if subtype not in _REPORT_FILE_MAP:
-        return f"@Lain — /report: unknown type '{subtype}'. Use: session, milestone, digest, ack, status, search"
+        return f"@Lain — /report: unknown type '{subtype}'. Use: session, milestone, digest, recap, ack, status, search"
 
     report_path = REPORTS_DIR / _REPORT_FILE_MAP[subtype]
 
@@ -582,10 +583,18 @@ def cmd_report(args):
         "digest": "tools/daily_digest.py",
     }
     if not report_path.exists():
-        result = subprocess.run(
-            ["/usr/bin/python3", str(PROJECT_DIR / tool_map[subtype])],
-            capture_output=True, text=True, cwd=str(PROJECT_DIR)
-        )
+        if subtype == "recap":
+            # recap_generator.py takes arguments, handle specially
+            result = subprocess.run(
+                ["/usr/bin/python3", str(PROJECT_DIR / "tools" / "recap_generator.py"),
+                 "generate", "--force"],
+                capture_output=True, text=True, cwd=str(PROJECT_DIR)
+            )
+        else:
+            result = subprocess.run(
+                ["/usr/bin/python3", str(PROJECT_DIR / tool_map[subtype])],
+                capture_output=True, text=True, cwd=str(PROJECT_DIR)
+            )
         if result.returncode != 0:
             return f"@Lain — /report: could not generate {subtype} report\n{result.stderr[:200]}"
 
@@ -617,7 +626,7 @@ def cmd_help():
         "/reset         — signal conv session to wrap up + restart\n"
         "/new           — clean new conversational session\n"
         "/voice on|off  — toggle Fish Audio TTS\n"
-        "/report [session|milestone|digest]  — surface latest report (marks delivered)\n"
+        "/report [session|milestone|digest|recap]  — surface latest report (marks delivered)\n"
         "/report search QUERY               — search report archive (FTS)\n"
         "/report ack [type]                  — acknowledge report as read\n"
         "/report status                      — review state for all reports\n"

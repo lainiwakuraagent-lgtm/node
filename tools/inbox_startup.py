@@ -34,6 +34,13 @@ AGENT_MESSAGES = PROJECT_DIR / "memory" / "work" / "agent_messages.md"
 CONTEXT_UPDATES = PROJECT_DIR / "memory" / "work" / "context_updates.md"
 LOOM_DB = Path.home() / ".local" / "share" / "loom" / "loom.db"
 LOOM_VENV_PYTHON = Path.home() / "lain" / "loom" / ".venv" / "bin" / "python"
+CHECKPOINT_FILE = PROJECT_DIR / "state" / "conversation" / "checkpoint.json"
+LAST_CHECKPOINT_FILE = PROJECT_DIR / "state" / "last_checkpoint_read.txt"
+OUTBOX_FILE = PROJECT_DIR / "state" / "conversation" / "outbox.json"
+LOOM_CONTEXT_FILE = PROJECT_DIR / "state" / "loom_context.json"
+QUEUE_NOTIFY_TS_FILE = PROJECT_DIR / "state" / "queue_empty_notify_last.txt"
+QUEUE_NOTIFY_DISABLED = PROJECT_DIR / "state" / "queue_empty_notify.disabled"
+CONV_LOCK_FILE = PROJECT_DIR / "state" / "conversation.lock"
 
 
 def load_inbox() -> list:
@@ -96,6 +103,66 @@ def create_loom_task(content: str, from_: str, status: str = "triage", tags: str
         return result.returncode == 0
     except Exception:
         return False
+
+
+def extract_checkpoint_directives(dry_run: bool) -> list:
+    """
+    Read state/conversation/checkpoint.json and inject any owner directives
+    as a context_update entry into inbox/pending.json.
+
+    Uses state/last_checkpoint_read.txt to avoid reprocessing the same checkpoint.
+    Returns a list of status strings for logging.
+    """
+    if not CHECKPOINT_FILE.exists():
+        return []
+
+    try:
+        data = json.loads(CHECKPOINT_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return ["checkpoint: read error — skipped"]
+
+    checkpoint_ts = data.get("timestamp", "")
+    if not checkpoint_ts:
+        return []
+
+    # Skip if we've already processed this checkpoint
+    if LAST_CHECKPOINT_FILE.exists():
+        if LAST_CHECKPOINT_FILE.read_text().strip() == checkpoint_ts:
+            return []
+
+    summary = data.get("summary", "")
+    user_msgs = [
+        m["text"] for m in data.get("last_messages", [])
+        if m.get("role") == "user" and m.get("text")
+    ]
+
+    if not summary and not user_msgs:
+        return []
+
+    content_parts = []
+    if summary:
+        content_parts.append(f"Checkpoint summary: {summary}")
+    for msg in user_msgs:
+        content_parts.append(f"Owner directive: {msg}")
+
+    content = "\n".join(content_parts)
+
+    if dry_run:
+        return [f"[DRY RUN] checkpoint directive: {content[:80]}"]
+
+    entry = {
+        "type": "context_update",
+        "from": "owner_checkpoint",
+        "content": content,
+        "timestamp": int(time.time()),
+        "processed": False,
+    }
+    entries = load_inbox()
+    entries.append(entry)
+    save_inbox(entries)
+
+    LAST_CHECKPOINT_FILE.write_text(checkpoint_ts)
+    return [f"checkpoint: directive injected — {content[:80]}"]
 
 
 def process_entry(entry: dict, dry_run: bool) -> str:
@@ -166,14 +233,121 @@ def process_entry(entry: dict, dry_run: bool) -> str:
         sop_id = entry.get("sop_id", entry.get("path", "?"))
         return f"{etype} → acknowledged: sop={sop_id} from={from_}: {content[:60]}"
 
+    elif etype == "sop_request":
+        title = entry.get("title", "untitled SOP")
+        instructions = entry.get("content", "")
+        task_name = f"Write SOP: {title}"
+        task_desc = f"SOP request from {from_}: {instructions}"
+        ok = create_loom_task(task_name[:80], from_, status="scheduled", tags="sop")
+        if ok:
+            # Wire to goal 1 (self-improvement tooling)
+            try:
+                import sqlite3 as _sqlite3
+                conn = _sqlite3.connect(str(LOOM_DB))
+                conn.execute(
+                    "UPDATE tasks SET goal_id=1 WHERE id=(SELECT MAX(id) FROM tasks WHERE tags='sop')"
+                )
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+        status_str = "loom task created (scheduled, goal 1)" if ok else "loom task FAILED"
+        return f"sop_request → {status_str}: {title[:60]}"
+
     else:
         return f"unknown type '{etype}' — skipped"
+
+
+def notify_queue_empty_if_needed() -> str | None:
+    """
+    If the Loom queue is empty and no conversation is active, write a
+    notification to outbox so Andrii knows to dispatch new work.
+    Rate-limited to once per 2 hours. Disabled by state/queue_empty_notify.disabled.
+    Returns a status string (for logging) or None if nothing was done.
+    """
+    if QUEUE_NOTIFY_DISABLED.exists():
+        return None
+
+    # Check conversation.lock — if conversation is active, owner is present; skip
+    try:
+        if CONV_LOCK_FILE.exists():
+            pid = int(CONV_LOCK_FILE.read_text().strip())
+            import os as _os
+            _os.kill(pid, 0)
+            return None  # conversation active — owner can ask directly
+    except (ValueError, ProcessLookupError, OSError):
+        pass
+
+    # Only fire for execution sessions
+    session_type = (PROJECT_DIR / "state" / "current_session_type.txt")
+    if not session_type.exists() or session_type.read_text().strip() != "execution":
+        return None
+
+    # Check loom_context for empty queue
+    if not LOOM_CONTEXT_FILE.exists():
+        return None
+    try:
+        ctx = json.loads(LOOM_CONTEXT_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    ready = ctx.get("ready_queue") or []
+    current = ctx.get("current_task")
+    if ready or current:
+        return None  # queue is not empty
+
+    # Rate limit: no more than once per 2 hours
+    now = time.time()
+    if QUEUE_NOTIFY_TS_FILE.exists():
+        try:
+            last_ts = float(QUEUE_NOTIFY_TS_FILE.read_text().strip())
+            if now - last_ts < 7200:  # 2 hours
+                return None
+        except (ValueError, OSError):
+            pass
+
+    # Write notification to outbox
+    try:
+        import uuid
+        OUTBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
+        entries = []
+        if OUTBOX_FILE.exists():
+            try:
+                entries = json.loads(OUTBOX_FILE.read_text())
+            except (json.JSONDecodeError, ValueError):
+                entries = []
+        entry = {
+            "id": str(uuid.uuid4())[:8],
+            "from": "execution_layer",
+            "type": "message",
+            "to": "owner",
+            "content": "@Lain — queue is empty. Nothing ready to execute. Waiting for new tasks.",
+            "timestamp": int(now),
+            "sent": False,
+        }
+        entries.append(entry)
+        OUTBOX_FILE.write_text(json.dumps(entries, indent=2))
+        QUEUE_NOTIFY_TS_FILE.write_text(str(now))
+        return "queue-empty notification written to outbox"
+    except Exception as e:
+        return f"queue-empty notify failed: {e}"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+
+    # Queue-empty notification (execution sessions only, when no conversation active)
+    if not args.dry_run:
+        notify_result = notify_queue_empty_if_needed()
+        if notify_result:
+            print(f"  • {notify_result}")
+
+    # Extract any owner directives from the last conversational checkpoint
+    cp_results = extract_checkpoint_directives(args.dry_run)
+    for r in cp_results:
+        print(f"  • {r}")
 
     entries = load_inbox()
     unprocessed = [e for e in entries if not e.get("processed", False)]

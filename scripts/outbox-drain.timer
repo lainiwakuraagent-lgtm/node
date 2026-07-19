@@ -1,0 +1,10 @@
+[Unit]
+Description=@Lain outbox drain timer — every 5 minutes
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=300s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

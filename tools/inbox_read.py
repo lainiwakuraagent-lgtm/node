@@ -27,6 +27,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 INBOX_FILE = PROJECT_DIR / "inbox" / "pending.json"
 
+
 PRUNE_DAYS = 7
 
 
