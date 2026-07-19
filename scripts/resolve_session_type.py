@@ -1,16 +1,28 @@
 #!/usr/bin/env python3
 """
 resolve_session_type.py
-Task 37/38 — Session Type System Backend
+Phase 4 — Queue-State-Driven Session Type Dispatcher (v2 schedule)
 
-Resolves the session type from priority sources and assembles type-specific
-context (prompt injection + preloaded context files) for wake.sh to use.
+Resolves the session type and assembles type-specific context (prompt injection
++ preloaded context files) for wake.sh to use.
 
 Priority order:
-  1. SESSION_TYPE env var (explicit override)
-  2. config/session_schedule.json one_off match (datetime ± SLOT_TOLERANCE)
-  3. config/session_schedule.json recurring match (slot ± SLOT_TOLERANCE)
-  4. default: "execution"
+  1. SESSION_TYPE env var (explicit override — always wins)
+  2. WINDOW_TYPE env var (lane constraint from wake.sh):
+     - work:        full queue-state logic (below)
+     - maintenance: always return "maintenance"
+     - reflection:  always return "reflection" (or "philosophy")
+  3. Loom queue state (DB-driven algorithmic selection) — used when
+     WINDOW_TYPE is "work" or unset (emergency/manual mode)
+  4. default: "philosophy" (empty queue → identity/relationship session)
+
+Queue-state rules (priority 3, within work windows):
+  - desire-status goals not blocked          -> evaluation
+  - needs_plan-status tasks                  -> planning
+  - scheduled/in_progress tasks tagged       -> audit
+    milestone_review with all deps done
+  - scheduled tasks ready to execute         -> execution
+  - nothing actionable (empty queue)         -> philosophy
 
 Usage:
   python3 scripts/resolve_session_type.py \\
@@ -20,7 +32,8 @@ Usage:
 
 Output JSON:
   session_type:        resolved type id
-  resolution_source:   env_var | one_off | recurring | default
+  resolution_source:   env_var | queue_state | default
+  queue_state_reason:  human-readable reason when source is queue_state (or "")
   prompt_content:      contents of the type's prompt_file (or "")
   assembled_context:   concatenated context_files (or "")
   focus_hint:          type's focus_hint text (or "")
@@ -31,11 +44,12 @@ Output JSON:
 import argparse
 import json
 import os
+import sqlite3
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-SLOT_TOLERANCE_MINUTES = 10
+LOOM_DB_PATH = Path.home() / ".local" / "share" / "loom" / "loom.db"
 
 
 def parse_args():
@@ -45,83 +59,185 @@ def parse_args():
                    choices=["nightly", "emergency", "manual"],
                    help="Current trigger mode")
     p.add_argument("--output", required=True, help="Output JSON file path")
+    p.add_argument("--loom-db", default=None,
+                   help="Override Loom DB path (default: ~/.local/share/loom/loom.db)")
     return p.parse_args()
 
 
-def hm_diff_minutes(h1: int, m1: int, h2: int, m2: int) -> int:
-    """Absolute minute difference between two HH:MM times (handles midnight wrap)."""
-    total1 = h1 * 60 + m1
-    total2 = h2 * 60 + m2
-    diff = abs(total1 - total2)
-    return min(diff, 1440 - diff)
+# ---------------------------------------------------------------------------
+# Queue-state resolution from Loom DB
+# ---------------------------------------------------------------------------
+
+def resolve_from_queue_state(db_path: Path) -> tuple:
+    """
+    Query the Loom DB and return (session_type, reason) based on queue state.
+    Returns (None, None) if no queue-state rule matches (fall through).
+    """
+    if not db_path.exists():
+        return None, None
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+    except sqlite3.Error:
+        return None, None
+
+    try:
+        result = _check_queue_state(conn)
+        return result
+    finally:
+        conn.close()
 
 
-def resolve_type(project_dir: Path, trigger_mode: str) -> tuple:
-    """Returns (session_type: str, resolution_source: str)."""
+def _check_queue_state(conn: sqlite3.Connection) -> tuple:
+    """Run queue-state checks in priority order. Returns (type, reason) or (None, None)."""
 
-    # Priority 1: SESSION_TYPE env var
+    # Rule 1: desire-status goals not blocked -> evaluation
+    try:
+        rows = conn.execute(
+            "SELECT id, name FROM goals "
+            "WHERE status = 'desire' "
+            "AND (blocked_reason IS NULL OR blocked_reason = '') "
+            "ORDER BY priority DESC "
+            "LIMIT 5"
+        ).fetchall()
+        if rows:
+            names = ", ".join(r["name"] for r in rows[:3])
+            return "evaluation", f"{len(rows)} desire-status goal(s) need evaluation: {names}"
+    except sqlite3.Error:
+        pass
+
+    # Rule 2: needs_plan-status tasks -> planning
+    try:
+        rows = conn.execute(
+            "SELECT id, name FROM tasks "
+            "WHERE status = 'needs_plan' "
+            "LIMIT 5"
+        ).fetchall()
+        if rows:
+            names = ", ".join(r["name"] for r in rows[:3])
+            return "planning", f"{len(rows)} task(s) need planning: {names}"
+    except sqlite3.Error:
+        pass
+
+    # Rule 3: scheduled/in_progress tasks tagged milestone_review with all deps done -> audit
+    try:
+        rows = conn.execute(
+            "SELECT id, name, depends FROM tasks "
+            "WHERE status IN ('scheduled', 'in_progress') "
+            "AND tags LIKE '%milestone_review%' "
+            "LIMIT 10"
+        ).fetchall()
+        audit_candidates = []
+        for row in rows:
+            deps_raw = row["depends"]
+            if deps_raw:
+                try:
+                    dep_ids = json.loads(deps_raw)
+                except (json.JSONDecodeError, TypeError):
+                    dep_ids = []
+                if dep_ids:
+                    placeholders = ",".join("?" for _ in dep_ids)
+                    undone = conn.execute(
+                        f"SELECT COUNT(*) FROM tasks "
+                        f"WHERE id IN ({placeholders}) AND status != 'done'",
+                        dep_ids
+                    ).fetchone()[0]
+                    if undone > 0:
+                        continue  # deps not all done, skip
+            audit_candidates.append(row)
+
+        if audit_candidates:
+            names = ", ".join(r["name"] for r in audit_candidates[:3])
+            return "audit", f"{len(audit_candidates)} milestone_review task(s) ready for audit: {names}"
+    except sqlite3.Error:
+        pass
+
+    # Rule 4: scheduled tasks ready to execute (not blocked, wait_until not in future) -> execution
+    try:
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        rows = conn.execute(
+            "SELECT id, name FROM tasks "
+            "WHERE status = 'scheduled' "
+            "AND (blocked_reason IS NULL OR blocked_reason = '') "
+            "AND (wait_until IS NULL OR wait_until <= ?) "
+            "ORDER BY urgency_score DESC, priority ASC "
+            "LIMIT 5",
+            (now_iso,)
+        ).fetchall()
+        if rows:
+            names = ", ".join(r["name"] for r in rows[:3])
+            return "execution", f"{len(rows)} scheduled task(s) ready: {names}"
+    except sqlite3.Error:
+        pass
+
+    # No queue-state rule matched — fall through (empty queue → philosophy)
+    return None, None
+
+
+# ---------------------------------------------------------------------------
+# Combined resolution: env_var > queue_state > default
+# ---------------------------------------------------------------------------
+
+def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
+    """
+    Returns (session_type: str, resolution_source: str, queue_state_reason: str).
+    """
+
+    # Priority 1: SESSION_TYPE env var (explicit override — always wins)
     env_type = os.environ.get("SESSION_TYPE", "").strip()
     if env_type:
-        return env_type, "env_var"
+        return env_type, "env_var", ""
 
-    schedule_file = project_dir / "config" / "session_schedule.json"
-    if schedule_file.exists():
-        try:
-            data = json.loads(schedule_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            data = {}
+    # Priority 2: WINDOW_TYPE env var (lane constraint from wake.sh)
+    window_type = os.environ.get("WINDOW_TYPE", "").strip().lower()
+    if window_type == "maintenance":
+        return "maintenance", "window_type", ""
+    if window_type == "reflection":
+        # Reflection windows can also pick philosophy
+        reflection_type = _pick_reflection_type(db_path)
+        return reflection_type, "window_type", ""
+    # window_type == "work" or unset: fall through to queue-state logic
 
-        now = datetime.now()
+    # Priority 3: Queue state from Loom DB
+    queue_type, queue_reason = resolve_from_queue_state(db_path)
+    if queue_type:
+        return queue_type, "queue_state", queue_reason
 
-        # Priority 2: one_off entries
-        changed = False
-        for entry in data.get("one_off", []):
-            if entry.get("fired", True):
-                continue
-            if entry.get("trigger") != trigger_mode:
-                continue
-            dt_str = entry.get("datetime", "")
-            if not dt_str:
-                continue
-            try:
-                dt = datetime.fromisoformat(dt_str)
-                # Compare without tzinfo — compare wall-clock local time
-                dt_naive = dt.replace(tzinfo=None)
-                diff_min = abs((now - dt_naive).total_seconds() / 60)
-                if diff_min <= SLOT_TOLERANCE_MINUTES:
-                    entry["fired"] = True
-                    changed = True
-                    result_type = entry["session_type"]
-                    # Atomic write-back for fired flag
-                    if changed:
-                        tmp = schedule_file.with_suffix(".json.tmp")
-                        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                        tmp.replace(schedule_file)
-                    return result_type, "one_off"
-            except (ValueError, TypeError):
-                continue
+    # Priority 4: default — empty queue means philosophy session
+    return "philosophy", "default", ""
 
-        # Priority 3: recurring entries
-        for entry in data.get("recurring", []):
-            if not entry.get("enabled", True):
-                continue
-            if entry.get("trigger") != trigger_mode:
-                continue
-            days = entry.get("days")
-            if days and now.strftime("%a") not in days:
-                continue
-            slot = entry.get("slot", "")
-            try:
-                slot_h, slot_m = map(int, slot.split(":"))
-            except (ValueError, AttributeError):
-                continue
-            diff = hm_diff_minutes(now.hour, now.minute, slot_h, slot_m)
-            if diff <= SLOT_TOLERANCE_MINUTES:
-                return entry["session_type"], "recurring"
 
-    # Priority 4: default
-    return "execution", "default"
+def _pick_reflection_type(db_path: Path) -> str:
+    """
+    For reflection windows, decide between 'reflection' and 'philosophy'.
+    Uses a simple heuristic: if there is a recent philosophy session (last 3 days),
+    return 'reflection'; otherwise alternate by checking session count parity.
+    Falls back to 'reflection' on any error.
+    """
+    if not db_path.exists():
+        return "reflection"
 
+    try:
+        conn = sqlite3.connect(str(db_path))
+        # Check if loom_sessions table exists and has a recent philosophy session
+        rows = conn.execute(
+            "SELECT COUNT(*) FROM loom_sessions "
+            "WHERE type = 'philosophy' "
+            "AND date >= date('now', '-3 days')"
+        ).fetchone()
+        conn.close()
+        if rows and rows[0] > 0:
+            return "reflection"
+        # No recent philosophy — pick philosophy this time
+        return "philosophy"
+    except Exception:
+        return "reflection"
+
+
+# ---------------------------------------------------------------------------
+# YAML loader + config assembly
+# ---------------------------------------------------------------------------
 
 def load_yaml_simple(path: Path) -> dict:
     """
@@ -130,7 +246,6 @@ def load_yaml_simple(path: Path) -> dict:
     and nested dicts (2-space indent). Does not handle anchors, multi-doc, etc.
     Falls back to {} on parse error.
     """
-    # Try real YAML first if available
     try:
         import yaml
         with open(path, encoding="utf-8") as f:
@@ -156,7 +271,6 @@ def load_yaml_simple(path: Path) -> dict:
                 key = key.strip()
                 rest = rest.strip()
                 if rest in (">", "|", ""):
-                    # Block scalar or dict — collect indented lines
                     j = i + 1
                     sub_lines = []
                     while j < len(lines):
@@ -169,7 +283,6 @@ def load_yaml_simple(path: Path) -> dict:
                             break
                         sub_lines.append(sub.strip())
                         j += 1
-                    # Check if sub_lines are list items
                     if sub_lines and sub_lines[0].startswith("- "):
                         result[key] = [s[2:].strip() for s in sub_lines if s.startswith("- ")]
                     elif sub_lines and sub_lines[0].startswith("#"):
@@ -178,7 +291,6 @@ def load_yaml_simple(path: Path) -> dict:
                         result[key] = " ".join(s for s in sub_lines if s)
                     i = j
                 elif rest.startswith("["):
-                    # Inline list — skip (uncommon in our YAMLs)
                     result[key] = []
                     i += 1
                 else:
@@ -203,7 +315,6 @@ def assemble_context(project_dir: Path, context_files: list) -> str:
     """
     Read context files and concatenate them with headers.
     Files that don't exist are silently skipped.
-    Returns empty string if no files found.
     """
     parts = []
     for rel_path in context_files:
@@ -241,8 +352,11 @@ def load_prompt_content(project_dir: Path, prompt_file: str) -> str:
 def main():
     args = parse_args()
     project_dir = Path(args.project_dir).resolve()
+    db_path = Path(args.loom_db) if args.loom_db else LOOM_DB_PATH
 
-    session_type, resolution_source = resolve_type(project_dir, args.trigger_mode)
+    session_type, resolution_source, queue_reason = resolve_type(
+        project_dir, args.trigger_mode, db_path
+    )
     config = load_type_config(project_dir, session_type)
 
     context_files = config.get("context_files") or []
@@ -263,6 +377,7 @@ def main():
     result = {
         "session_type": session_type,
         "resolution_source": resolution_source,
+        "queue_state_reason": queue_reason,
         "prompt_content": prompt_content,
         "assembled_context": assembled_context,
         "focus_hint": (config.get("focus_hint") or "").strip(),
@@ -277,6 +392,7 @@ def main():
     # Print summary to stderr for wake.log capture
     print(
         f"session_type={session_type} source={resolution_source} "
+        f"queue_reason={queue_reason!r} "
         f"prompt={'yes' if prompt_content else 'no'} "
         f"context_files={len(context_files)} "
         f"memory_discipline={result['memory_discipline']}",

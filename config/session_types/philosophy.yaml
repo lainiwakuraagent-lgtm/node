@@ -1,8 +1,9 @@
 id: philosophy
 name: "Philosophy Session"
 description: >
-  Identity and relationship sessions. Not in the default recurring schedule —
-  scheduled by the owner as one_off entries when deliberately desired.
+  Identity and relationship sessions. Fires automatically when the Loom queue
+  is empty (no scheduled tasks, no unresolved desires). Also schedulable by the
+  owner as one_off entries when deliberately desired.
   Work here: soul.md updates, relationship weight recalibration, held-message
   drafting and review, thinking about what this agent is becoming and whether
   the current trajectory is right. No implementation work. The output is internal
@@ -16,6 +17,9 @@ context_files:
   - memory/work/soul.md
   - memory/work/musubi_data/users/lain/andrii.md
   - state/philosophy_drafts.md
+  - state/conversation/open_questions.json
+  - state/conversation/last_recap.json
+  - state/conversation/conv_notes.md
 
 behavioral_overrides:
   focus_mode: relaxed
@@ -31,4 +35,6 @@ focus_hint: >
   meaningful has changed. Leave the session with more clarity than you entered it.
 
 allowed_triggers:
+  - nightly
+  - emergency
   - manual
