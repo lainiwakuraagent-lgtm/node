@@ -309,12 +309,27 @@ def write_session(conn, args):
     session_key = args.session_key or derive_session_key()
 
     conn.execute("""
-        INSERT OR REPLACE INTO sessions
+        INSERT INTO sessions
         (session_key, trigger_mode, session_type, type_resolution_source,
          started_at, ended_at,
          duration_minutes, model, context_pct_at_exit, exit_reason,
          goal_id, loom_session_id, tasks_completed, summary, handoff)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_key) DO UPDATE SET
+            trigger_mode           = excluded.trigger_mode,
+            session_type           = excluded.session_type,
+            type_resolution_source = excluded.type_resolution_source,
+            started_at             = excluded.started_at,
+            ended_at               = excluded.ended_at,
+            duration_minutes       = excluded.duration_minutes,
+            model                  = excluded.model,
+            context_pct_at_exit    = excluded.context_pct_at_exit,
+            exit_reason            = excluded.exit_reason,
+            goal_id                = excluded.goal_id,
+            loom_session_id        = excluded.loom_session_id,
+            tasks_completed        = excluded.tasks_completed,
+            summary                = excluded.summary,
+            handoff                = excluded.handoff
     """, (
         session_key,
         mode,
@@ -355,11 +370,21 @@ def write_costs_and_tools(conn, session_id, model, no_transcript=False):
     total = inp + out
 
     if total > 0 or cost > 0:
-        conn.execute("""
-            INSERT OR REPLACE INTO session_costs
-            (session_id, input_tokens, output_tokens, total_tokens, cost_usd, model)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (session_id, inp, out, total, cost, model))
+        existing = conn.execute(
+            "SELECT id FROM session_costs WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if existing:
+            conn.execute("""
+                UPDATE session_costs
+                SET input_tokens=?, output_tokens=?, total_tokens=?, cost_usd=?, model=?
+                WHERE session_id=?
+            """, (inp, out, total, cost, model, session_id))
+        else:
+            conn.execute("""
+                INSERT INTO session_costs
+                (session_id, input_tokens, output_tokens, total_tokens, cost_usd, model)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (session_id, inp, out, total, cost, model))
         print(f"analytics: tokens={total} (in={inp} out={out}) cost=${cost:.4f}", flush=True)
 
     for tool_name, count in parsed["tool_calls"].items():
@@ -449,7 +474,11 @@ def main():
     parser = argparse.ArgumentParser(description="Write session analytics to analytics.db")
     parser.add_argument("--session-key", help="Session key (YYYY-MM-DD_N)")
     _session_type_choices = ["execution", "planning", "maintenance", "philosophy", "free"]
-    _default_session_type = os.environ.get("CURRENT_SESSION_TYPE", "execution")
+    _default_session_type = os.environ.get("CURRENT_SESSION_TYPE", "")
+    if not _default_session_type:
+        _type_file = Path(__file__).parent.parent / "state" / "current_session_type.txt"
+        if _type_file.exists():
+            _default_session_type = _type_file.read_text().strip()
     if _default_session_type not in _session_type_choices:
         _default_session_type = "execution"
     parser.add_argument("--session-type", default=_default_session_type,
