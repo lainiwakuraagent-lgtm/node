@@ -326,6 +326,13 @@ if [ -f "$BEHAVIORAL_TOOL" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
     || log_line "WARNING: behavioral_adapter.py failed (non-fatal)."
 fi
 
+# --- Prune processed inbox entries older than 7 days (non-fatal) ---
+INBOX_READ="$PROJECT_DIR/tools/inbox_read.py"
+if [ -f "$INBOX_READ" ]; then
+  _prune_result=$(/usr/bin/python3 "$INBOX_READ" --prune 2>/dev/null || echo "")
+  [ -n "$_prune_result" ] && log_line "$_prune_result" || true
+fi
+
 # --- Launch Claude Code headless ---
 # --dangerously-skip-permissions is intentional: agent runs unattended.
 # Containment is handled at the VM/network level, not here.
