@@ -204,8 +204,37 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
     if queue_type:
         return queue_type, "queue_state", queue_reason
 
+    # Priority 3b: Inbox has unprocessed task_requests/bug_reports → execution needed
+    # This handles the case where inbox_startup.py hasn't run yet (it runs inside the
+    # session, after session type is resolved). If inbox has actionable work, force
+    # execution so inbox_startup can convert entries to Loom tasks and work them.
+    if _inbox_has_pending_tasks(project_dir):
+        return "execution", "inbox_pending", \
+            "inbox/pending.json has unprocessed task_request/bug_report entries"
+
     # Priority 4: default — empty queue means philosophy session
     return "philosophy", "default", ""
+
+
+def _inbox_has_pending_tasks(project_dir: Path) -> bool:
+    """
+    Return True if inbox/pending.json contains unprocessed task_request or bug_report entries.
+    Used to force execution session type when the Loom queue is empty but inbox has work.
+    """
+    inbox_path = project_dir / "inbox" / "pending.json"
+    if not inbox_path.exists():
+        return False
+    try:
+        data = json.loads(inbox_path.read_text(encoding="utf-8"))
+        entries = data if isinstance(data, list) else data.get("entries", [])
+        for e in entries:
+            if e.get("processed", False):
+                continue
+            if e.get("type") in ("task_request", "bug_report"):
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def _pick_reflection_type(db_path: Path) -> str:

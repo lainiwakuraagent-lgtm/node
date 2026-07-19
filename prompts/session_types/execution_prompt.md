@@ -11,6 +11,11 @@ write outputs that exist after you are gone.
 
 ## How to proceed
 
+0. **Check inbox first** (step 4 in orientation does this, but confirm):
+   If `inbox/pending.json` has unprocessed `task_request` or `bug_report` entries,
+   run `python3 tools/inbox_startup.py` to convert them to Loom tasks before
+   reading the Loom queue. The session type was forced to execution because inbox
+   had pending work — process it before diving into Loom.
 1. Read `state/loom_context.json` to find the current task.
 2. Read `memory/progress.md` for the next action if loom_context doesn't clarify it.
 3. Work the task completely — don't stop halfway because it's getting complex.
