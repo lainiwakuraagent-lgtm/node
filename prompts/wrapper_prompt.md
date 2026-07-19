@@ -41,7 +41,7 @@ Run these in order, every single wake, before touching the goal:
    For session types that do NOT pre-load them (planning, philosophy,
    maintenance), read them as instructed below.
 
-   **ALWAYS read these two:**
+   **Read these unless already in CONTEXT PRELOAD (execution/planning sessions pre-load them):**
    - `/home/andrii/lain/agent_project/memory/latest_summary.md`
      Handoff from your last session: what you did, what's next, what failed.
      It has a "HOT STATE" block at the top — read that first and orient.
@@ -49,8 +49,6 @@ Run these in order, every single wake, before touching the goal:
      Compressed digest of all accumulated learnings (environment quirks, git/GitHub patterns,
      session mechanics, architecture facts). Read this before repeating past mistakes.
      (Full append-only log: memory/learnings.md — do NOT read that file; it is 500+ lines.)
-
-   **Read on every session (if file exists):**
    - `state/behavioral_context.txt`
      Pre-computed tone calibration flags (DISCLOSURE_LEVEL, WARMTH_EXPRESSION, FRICTION_GUARD)
      derived from the current relationship state with the owner. Generated fresh each wake
