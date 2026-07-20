@@ -87,7 +87,7 @@ def check_triggers() -> list[dict]:
         # Long stretches with no philosophy sessions
         recent_philosophy = db.execute("""
             SELECT COUNT(*) as n FROM loom_sessions
-            WHERE session_type = 'philosophy'
+            WHERE type = 'philosophy'
               AND started_at > datetime('now', '-7 days')
         """).fetchone()
         if recent_philosophy and recent_philosophy["n"] == 0:
