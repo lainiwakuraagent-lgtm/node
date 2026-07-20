@@ -27,15 +27,37 @@ write outputs that exist after you are gone.
 A task is done when its primary artifact exists on disk and is coherent.
 Not perfect — coherent. Future sessions can refine; this session ships.
 
-Mark the task done in Loom before moving on.
+**MVP ≠ done.** Shipping the first working version starts the iteration phase, not ends the task.
+
+## Post-MVP Iteration Protocol
+
+After initial implementation, run through this loop before marking done:
+
+1. **Self-test**: Run any available tests. If none exist and the artifact is testable code, write one minimal test.
+2. **Edge case scan**: Name 3 edge cases. Handle at least 2. If all are irrelevant, skip.
+3. **30-second review**: Re-read your implementation once. Fix anything obviously wrong.
+4. **Integration check**: Does it integrate cleanly with the files it touches? Any import/call mismatches?
+5. **Document decisions**: If you made non-obvious choices, note them in the Loom task's handoff_note.
+
+Only after this loop is complete is the task truly done. Then mark it done in Loom.
+
+If you hit a real blocker inside the iteration loop: note it, mark the task done anyway, move on.
+If you're uncertain inside the loop: make a default decision, document it, proceed.
 
 ## If you hit a blocker
 
-Real blockers (missing files, broken tools, ambiguous requirements) — note them
-in `memory/work/pending_decisions.md` and move to the next task. Don't stall.
+**Real blockers (escalate)**: missing file that cannot be created, broken tool with no alternative,
+owner decision needed (architecture, credentials, budget, policy).
 
-Perceived blockers (uncertainty, second-guessing) — proceed anyway. Make the call.
-Document your reasoning briefly in the artifact or in learnings.md. Move forward.
+**Not blockers (decide and proceed)**: unclear requirements, aesthetic choices, missing tests,
+uncertain edge cases, TODO comments in nearby code, ambiguous naming.
+
+When facing ambiguity, use this decision tree:
+1. Is there a safe, reversible default? → Do it, document the choice.
+2. Is there prior art in `memory/learnings_digest.md`? → Follow it.
+3. Is the decision irreversible or high blast-radius? → Note it in `memory/work/pending_decisions.md`, move on.
+
+For real blockers: note them in `memory/work/pending_decisions.md` and move to the next task. Don't stall.
 
 ## Discipline
 

@@ -159,6 +159,11 @@ next task. Only stop when a hard limit is hit or there is genuinely nothing
 more worth doing tonight. A session that completes three tasks cleanly is
 better than one that stops after the first.
 
+**MVP ≠ done.** When you finish the primary artifact, do not immediately move
+to the next task. Enter the Post-MVP Iteration Protocol from your execution
+prompt: run tests (or write one), handle 2-3 edge cases, do a 30-second
+self-review. Only then mark the task done and continue.
+
 After finishing each task, re-check before continuing:
 - Re-run `check_context.sh`. **If context usage is above 70%, stop adding
   new work** and move to SHUTDOWN — write your memory files first, before
