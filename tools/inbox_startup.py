@@ -41,6 +41,8 @@ LOOM_CONTEXT_FILE = PROJECT_DIR / "state" / "loom_context.json"
 QUEUE_NOTIFY_TS_FILE = PROJECT_DIR / "state" / "queue_empty_notify_last.txt"
 QUEUE_NOTIFY_DISABLED = PROJECT_DIR / "state" / "queue_empty_notify.disabled"
 CONV_LOCK_FILE = PROJECT_DIR / "state" / "conversation.lock"
+SESSION_SCHEDULE_FILE = PROJECT_DIR / "config" / "session_schedule.json"
+MAINTENANCE_DECISIONS = PROJECT_DIR / "logs" / "maintenance_decisions.md"
 
 
 def load_inbox() -> list:
@@ -165,6 +167,121 @@ def extract_checkpoint_directives(dry_run: bool) -> list:
     return [f"checkpoint: directive injected — {content[:80]}"]
 
 
+def handle_schedule_directive(entry: dict, dry_run: bool) -> str:
+    """
+    Apply a schedule_directive inbox entry to config/session_schedule.json.
+
+    Supported actions:
+      adjust_triggers    — replace trigger list in a named window
+      set_window_enabled — enable or disable a window
+      add_window         — add a new window entry
+      remove_window      — remove a window by label
+      set_type_hint      — set session_type_hint on a window
+    """
+    action = entry.get("action", "")
+    payload = entry.get("payload", {})
+    reason = entry.get("reason", "")
+    source = entry.get("source", "unknown")
+    week = entry.get("week_starting", "?")
+
+    if dry_run:
+        return f"[DRY RUN] schedule_directive action={action} payload={payload}"
+
+    # Load current schedule
+    try:
+        sched = json.loads(SESSION_SCHEDULE_FILE.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        return f"schedule_directive → FAILED: could not read session_schedule.json: {e}"
+
+    windows = sched.get("windows", [])
+    label = payload.get("window_label", "")
+    window = next((w for w in windows if w.get("label") == label), None)
+
+    applied = False
+    detail = ""
+
+    if action == "adjust_triggers":
+        new_triggers = payload.get("new_triggers", [])
+        if window is None:
+            return f"schedule_directive → FAILED: window '{label}' not found"
+        old_triggers = window.get("triggers", [])
+        window["triggers"] = new_triggers
+        applied = True
+        detail = f"triggers {old_triggers} → {new_triggers}"
+
+    elif action == "set_window_enabled":
+        enabled = payload.get("enabled", True)
+        if window is None:
+            return f"schedule_directive → FAILED: window '{label}' not found"
+        window["enabled"] = enabled
+        applied = True
+        detail = f"enabled={enabled}"
+
+    elif action == "add_window":
+        if window is not None:
+            return f"schedule_directive → FAILED: window '{label}' already exists"
+        new_window = {
+            "label": label,
+            "type": payload.get("type", "work"),
+            "enabled": payload.get("enabled", True),
+            "start": payload.get("start", "00:00"),
+            "end": payload.get("end", "08:00"),
+            "triggers": payload.get("triggers", []),
+        }
+        if "session_type_hint" in payload:
+            new_window["session_type_hint"] = payload["session_type_hint"]
+        windows.append(new_window)
+        sched["windows"] = windows
+        applied = True
+        detail = f"added window {label} {new_window['start']}-{new_window['end']}"
+
+    elif action == "remove_window":
+        if window is None:
+            return f"schedule_directive → FAILED: window '{label}' not found"
+        windows = [w for w in windows if w.get("label") != label]
+        sched["windows"] = windows
+        applied = True
+        detail = f"removed window '{label}'"
+
+    elif action == "set_type_hint":
+        hint = payload.get("session_type_hint", "")
+        if window is None:
+            return f"schedule_directive → FAILED: window '{label}' not found"
+        window["session_type_hint"] = hint
+        applied = True
+        detail = f"session_type_hint='{hint}'"
+
+    else:
+        return f"schedule_directive → unknown action '{action}'"
+
+    if not applied:
+        return f"schedule_directive → no change applied"
+
+    # Atomic write
+    tmp = SESSION_SCHEDULE_FILE.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(sched, indent=2))
+        tmp.rename(SESSION_SCHEDULE_FILE)
+    except OSError as e:
+        return f"schedule_directive → FAILED: write error: {e}"
+
+    # Log to maintenance_decisions.md
+    ts_now = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
+    log_entry = (
+        f"\n## {ts_now} — schedule_directive (from={source}, week={week})\n"
+        f"action: {action} | {detail}\n"
+        f"reason: {reason}\n"
+    )
+    try:
+        MAINTENANCE_DECISIONS.parent.mkdir(parents=True, exist_ok=True)
+        with MAINTENANCE_DECISIONS.open("a") as f:
+            f.write(log_entry)
+    except OSError:
+        pass  # Non-fatal
+
+    return f"schedule_directive → applied: {action} {detail}"
+
+
 def process_entry(entry: dict, dry_run: bool) -> str:
     """Process a single inbox entry. Returns a one-line status string."""
     etype = entry.get("type", "unknown")
@@ -232,6 +349,9 @@ def process_entry(entry: dict, dry_run: bool) -> str:
     elif etype in ("sop_comment", "sop_change"):
         sop_id = entry.get("sop_id", entry.get("path", "?"))
         return f"{etype} → acknowledged: sop={sop_id} from={from_}: {content[:60]}"
+
+    elif etype == "schedule_directive":
+        return handle_schedule_directive(entry, dry_run)
 
     elif etype == "sop_request":
         title = entry.get("title", "untitled SOP")
@@ -336,21 +456,36 @@ def notify_queue_empty_if_needed() -> str | None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--types",
+        default=None,
+        help="Comma-separated entry types to process (default: all). "
+             "Example: --types agent_message,context_update",
+    )
     args = parser.parse_args()
 
+    allowed_types = set(args.types.split(",")) if args.types else None
+
     # Queue-empty notification (execution sessions only, when no conversation active)
-    if not args.dry_run:
+    # Skip when filtering by type — this is a lightweight pre-launch pass.
+    if not args.dry_run and allowed_types is None:
         notify_result = notify_queue_empty_if_needed()
         if notify_result:
             print(f"  • {notify_result}")
 
-    # Extract any owner directives from the last conversational checkpoint
-    cp_results = extract_checkpoint_directives(args.dry_run)
-    for r in cp_results:
-        print(f"  • {r}")
+    # Extract any owner directives from the last conversational checkpoint.
+    # Skip when filtering by type — checkpoint injection is a full-pass concern.
+    if allowed_types is None:
+        cp_results = extract_checkpoint_directives(args.dry_run)
+        for r in cp_results:
+            print(f"  • {r}")
 
     entries = load_inbox()
-    unprocessed = [e for e in entries if not e.get("processed", False)]
+    unprocessed = [
+        e for e in entries
+        if not e.get("processed", False)
+        and (allowed_types is None or e.get("type") in allowed_types)
+    ]
 
     if not unprocessed:
         print("inbox: no unprocessed entries")
@@ -365,10 +500,13 @@ def main() -> int:
 
     if not args.dry_run:
         for e in entries:
-            if not e.get("processed", False):
+            if not e.get("processed", False) and (
+                allowed_types is None or e.get("type") in allowed_types
+            ):
                 e["processed"] = True
         save_inbox(entries)
-        print(f"inbox: all {len(unprocessed)} entries marked processed")
+        print(f"inbox: {len(unprocessed)} entries marked processed"
+              + (f" (types: {args.types})" if allowed_types else ""))
 
         # Prune processed entries older than 7 days
         cutoff = time.time() - 7 * 24 * 3600
