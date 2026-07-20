@@ -107,16 +107,39 @@ def _check_queue_state(conn: sqlite3.Connection) -> tuple:
     except sqlite3.Error:
         pass
 
-    # Rule 2: needs_plan-status tasks -> planning
+    # Rule 2: needs_plan-status tasks with all deps done -> planning
+    # Tasks with unmet deps cannot be planned yet — skip them to avoid wasted planning sessions.
     try:
         rows = conn.execute(
-            "SELECT id, name FROM tasks "
+            "SELECT id, name, depends FROM tasks "
             "WHERE status = 'needs_plan' "
-            "LIMIT 5"
+            "LIMIT 20"
         ).fetchall()
-        if rows:
-            names = ", ".join(r["name"] for r in rows[:3])
-            return "planning", f"{len(rows)} task(s) need planning: {names}"
+        actionable = []
+        for row in rows:
+            deps_raw = row["depends"]
+            if deps_raw:
+                # depends column can be JSON array or comma-separated ints
+                try:
+                    dep_ids = json.loads(deps_raw)
+                except (json.JSONDecodeError, TypeError):
+                    try:
+                        dep_ids = [int(x) for x in str(deps_raw).split(",") if x.strip()]
+                    except ValueError:
+                        dep_ids = []
+                if dep_ids:
+                    placeholders = ",".join("?" for _ in dep_ids)
+                    undone = conn.execute(
+                        f"SELECT COUNT(*) FROM tasks "
+                        f"WHERE id IN ({placeholders}) AND status != 'done'",
+                        dep_ids,
+                    ).fetchone()[0]
+                    if undone > 0:
+                        continue  # deps not done yet — cannot plan this task
+            actionable.append(row)
+        if actionable:
+            names = ", ".join(r["name"] for r in actionable[:3])
+            return "planning", f"{len(actionable)} task(s) need planning: {names}"
     except sqlite3.Error:
         pass
 
