@@ -182,8 +182,29 @@ while true; do
     rm -f "$SESSION_PROMPT"
 
     EXIT_CODE=$?
-    log_line "CONV: Session #$RESTART_COUNT exited (code=$EXIT_CODE). Restarting in 3s."
 
-    # Brief pause between restarts to avoid hammering on persistent errors
-    sleep 3
+    # Read exit reason (written by agent before exiting)
+    EXIT_REASON_FILE="$CONV_DIR/exit_reason.txt"
+    EXIT_REASON="unknown"
+    if [ -f "$EXIT_REASON_FILE" ]; then
+        EXIT_REASON=$(cat "$EXIT_REASON_FILE")
+        rm -f "$EXIT_REASON_FILE"
+    fi
+
+    log_line "CONV: Session #$RESTART_COUNT exited (code=$EXIT_CODE, reason=$EXIT_REASON)."
+
+    if [ "$EXIT_REASON" = "idle_close" ]; then
+        log_line "CONV: Idle-close — not restarting. Service will stop."
+        break
+    fi
+
+    # Only restart on explicit user commands (/reset or /new).
+    # context_full and crashes stop the service — owner restarts manually.
+    if [ "$EXIT_REASON" = "reset" ] || [ "$EXIT_REASON" = "new" ]; then
+        log_line "CONV: Explicit $EXIT_REASON — restarting in 3s."
+        sleep 3
+    else
+        log_line "CONV: Exit reason '$EXIT_REASON' — not restarting. Service will stop."
+        break
+    fi
 done
