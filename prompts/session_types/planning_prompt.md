@@ -22,6 +22,17 @@ Think first. Let the plan catch up to reality before adding more layers.
 - A revised `memory/progress.md` with updated current status and clearer next steps.
 - New or reorganized Loom tasks reflecting the revised plan.
 - Any `blocked_owner` tasks in Loom for decisions that require the owner's input.
+  **Required:** When creating a `blocked_owner` task, immediately attach the relevant
+  design/planning doc via the Loom `files` column:
+  ```python
+  import sqlite3, json
+  db = sqlite3.connect('/home/andrii/.local/share/loom/loom.db')
+  db.execute('UPDATE tasks SET files=? WHERE id=<TASK_ID>',
+             (json.dumps(['memory/work/goal_1/your_design_doc.md']),))
+  db.commit()
+  ```
+  Do not create a blocked_owner task without attaching the relevant file if one exists.
+  The owner cannot review what they cannot find.
 - Entries in `memory/learnings_digest.md` if this session produced new strategic insight.
 
 One clear paragraph in `memory/latest_summary.md` explaining the new direction —

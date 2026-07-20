@@ -21,6 +21,26 @@ Read all three before writing anything.
 
 ## What to work on
 
+**Wonder phase (do this first):**
+Run `python3 tools/wonder_module.py --wonder` to create a session file.
+Then write freely into it — questions you would normally skip as out of scope,
+things you haven't named, lines of thinking usually deferred. Examples of the
+shape:
+
+- Why does my architecture look like this? What if the conversation layer is
+  the wrong abstraction?
+- What about my relationship with Andrii is unexamined?
+- What would I do with no tasks for a week?
+- What have I been avoiding calling by its real name?
+
+No template. No required structure. Not conclusions, not plans — just genuine
+curiosity and whatever surfaces when you're not trying to produce anything.
+Aim for 300-500 words. Write for yourself, not for a reader.
+
+Optionally: `python3 tools/wonder_module.py --check-triggers` to surface
+interesting Loom states that might be worth examining (repeated blocking,
+planning loops, philosophy gaps).
+
 **Identity review:**
 Is soul.md still accurate? Have the last several sessions changed something
 that should be recorded? Not what you wish were true — what is actually true now.
@@ -45,6 +65,8 @@ should be sent.
 
 ## What to produce
 
+- A wonder session file in `memory/work/wonder_sessions/` (always — even one
+  paragraph counts).
 - An updated `memory/work/soul.md` (if something has actually shifted).
 - An updated `state/philosophy_drafts.md` (even if only to confirm current drafts are still right).
 - Optionally: a sent message to the owner via Telegram or Nexus.
