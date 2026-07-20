@@ -548,3 +548,22 @@ if [ -f "$REL_TOOL" ] && [ -f "$REL_PROFILE" ]; then
     && log_line "Relationship state updated + broadcast to Nexus quorum-ops." \
     || log_line "WARNING: relationship_update.py failed (non-fatal)."
 fi
+
+# --- Write analytics record (fallback — agent writes it during shutdown; this catches gate aborts) ---
+# --skip-if-exists: if agent already wrote it during its own shutdown, preserve the richer record.
+ANALYTICS_TOOL="$PROJECT_DIR/tools/analytics_write.py"
+if [ -f "$ANALYTICS_TOOL" ]; then
+  CONTEXT_PCT_AT_EXIT=$(bash "$PROJECT_DIR/tools/check_context.sh" 2>/dev/null \
+    | grep "context_pct_estimate" | grep -oP '\d+(?=%)' | head -1 || echo "0")
+  /usr/bin/python3 "$ANALYTICS_TOOL" \
+    --session-type "${CURRENT_SESSION_TYPE:-execution}" \
+    --exit-reason "gate_abort" \
+    --summary "wake.sh fallback — agent did not write analytics" \
+    --tasks-completed 0 \
+    --context-pct "${CONTEXT_PCT_AT_EXIT:-0}" \
+    --no-transcript \
+    --skip-if-exists \
+    > /dev/null 2>&1 \
+    && log_line "Analytics fallback record written (or skipped — agent already wrote it)." \
+    || log_line "WARNING: analytics_write.py fallback failed (non-fatal)."
+fi

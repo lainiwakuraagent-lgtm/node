@@ -497,6 +497,8 @@ def main():
                         help="Import session_log.csv (historical)")
     parser.add_argument("--no-transcript", action="store_true",
                         help="Skip transcript parsing")
+    parser.add_argument("--skip-if-exists", action="store_true",
+                        help="Skip write if session_key already exists (wake.sh fallback mode)")
     parser.add_argument("--db", default=str(DB_PATH), help="DB path")
     args = parser.parse_args()
 
@@ -516,6 +518,16 @@ def main():
         import_csv(conn)
         conn.close()
         return
+
+    if getattr(args, "skip_if_exists", False):
+        _key = args.session_key or derive_session_key()
+        _exists = conn.execute(
+            "SELECT 1 FROM sessions WHERE session_key = ?", (_key,)
+        ).fetchone()
+        if _exists:
+            print(f"analytics: session_key {_key!r} already exists — skipping (agent wrote it).", flush=True)
+            conn.close()
+            return
 
     session_id, model = write_session(conn, args)
     write_costs_and_tools(conn, session_id, model, no_transcript=args.no_transcript)
