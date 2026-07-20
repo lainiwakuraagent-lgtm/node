@@ -204,13 +204,13 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
     if queue_type:
         return queue_type, "queue_state", queue_reason
 
-    # Priority 3b: Inbox has unprocessed task_requests/bug_reports → execution needed
+    # Priority 3b: Inbox has unprocessed task_requests/bug_reports/task_comments → execution needed
     # This handles the case where inbox_startup.py hasn't run yet (it runs inside the
     # session, after session type is resolved). If inbox has actionable work, force
     # execution so inbox_startup can convert entries to Loom tasks and work them.
     if _inbox_has_pending_tasks(project_dir):
         return "execution", "inbox_pending", \
-            "inbox/pending.json has unprocessed task_request/bug_report entries"
+            "inbox/pending.json has unprocessed task_request/bug_report/task_comment entries"
 
     # Priority 4: default — empty queue means philosophy session
     return "philosophy", "default", ""
@@ -218,8 +218,12 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
 
 def _inbox_has_pending_tasks(project_dir: Path) -> bool:
     """
-    Return True if inbox/pending.json contains unprocessed task_request or bug_report entries.
-    Used to force execution session type when the Loom queue is empty but inbox has work.
+    Return True if inbox/pending.json contains unprocessed entries that require
+    an execution session to handle: task_request, bug_report, or task_comment.
+
+    task_comment entries carry owner feedback on existing Loom tasks. Without this
+    check, an empty Loom queue causes philosophy sessions to loop while task_comments
+    sit unread in the inbox.
     """
     inbox_path = project_dir / "inbox" / "pending.json"
     if not inbox_path.exists():
@@ -230,7 +234,7 @@ def _inbox_has_pending_tasks(project_dir: Path) -> bool:
         for e in entries:
             if e.get("processed", False):
                 continue
-            if e.get("type") in ("task_request", "bug_report"):
+            if e.get("type") in ("task_request", "bug_report", "task_comment"):
                 return True
         return False
     except Exception:
