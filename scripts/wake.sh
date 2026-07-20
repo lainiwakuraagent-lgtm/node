@@ -367,6 +367,13 @@ if [ -f "$PROJECT_DIR/scripts/resolve_session_type.py" ]; then
   echo "$CURRENT_SESSION_TYPE" > "$STATE_DIR/current_session_type.txt"
   log_line "Session type: $CURRENT_SESSION_TYPE (source: $CURRENT_SESSION_TYPE_SOURCE)"
 
+  # Export maintenance scope if present (scope_id from resolve_session_type.py result).
+  MAINTENANCE_SCOPE=$(python3 -c \
+    "import json,sys; d=json.load(open(sys.argv[1])); s=d.get('scope_id'); print(s if s else '')" \
+    "$SESSION_TYPE_RESULT" 2>/dev/null || echo "")
+  export MAINTENANCE_SCOPE
+  [ -n "$MAINTENANCE_SCOPE" ] && log_line "Maintenance scope: $MAINTENANCE_SCOPE"
+
   # Build augmented goal: type prompt + context preload + original goal content.
   # Falls back to original goal if the augmentation step fails.
   AUGMENTED_GOAL=$(mktemp "$STATE_DIR/augmented_goal.XXXXXX.md")
@@ -378,6 +385,12 @@ try:
     parts = []
     p = data.get('prompt_content', '').strip()
     c = data.get('assembled_context', '').strip()
+    # Substitute maintenance scope placeholders if present
+    if p and data.get('scope_id'):
+        scope_name = data.get('scope_name', f'Scope {data[\"scope_id\"]}')
+        focus_hint = data.get('focus_hint', '')
+        p = p.replace('{MAINTENANCE_SCOPE_NAME}', scope_name)
+        p = p.replace('{MAINTENANCE_SCOPE_FOCUS}', focus_hint)
     if p:
         parts.append(p)
     if c:

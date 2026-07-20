@@ -341,7 +341,34 @@ def load_type_config(project_dir: Path, session_type: str) -> dict:
     type_file = project_dir / "config" / "session_types" / f"{session_type}.yaml"
     if not type_file.exists():
         return {}
-    return load_yaml_simple(type_file)
+    config = load_yaml_simple(type_file)
+
+    # Scope rotation for maintenance sessions
+    if session_type == "maintenance" and config.get("scope_rotation"):
+        scope_state_file = project_dir / config["scope_state_file"]
+        try:
+            idx = int(scope_state_file.read_text(encoding="utf-8").strip())
+        except (FileNotFoundError, ValueError, OSError):
+            idx = 0
+
+        scope_num = idx + 1  # 1-indexed for YAML file naming
+        scope_file = project_dir / "config" / "session_types" / f"maintenance_scope{scope_num}.yaml"
+        scope_config = load_yaml_simple(scope_file)
+
+        # Merge: scope overrides base context and focus_hint
+        config["context_files"] = scope_config.get("context_files", config.get("context_files", []))
+        config["focus_hint"] = scope_config.get("focus_hint", config.get("focus_hint", ""))
+        config["scope_id"] = scope_num
+        config["scope_name"] = scope_config.get("scope_name", f"Scope {scope_num}")
+
+        # Rotate for next maintenance session
+        next_idx = (idx + 1) % 3
+        try:
+            scope_state_file.write_text(str(next_idx), encoding="utf-8")
+        except OSError:
+            pass
+
+    return config
 
 
 def assemble_context(project_dir: Path, context_files: list) -> str:
@@ -416,6 +443,8 @@ def main():
         "focus_hint": (config.get("focus_hint") or "").strip(),
         "behavioral_overrides": behavioral_overrides,
         "memory_discipline": behavioral_overrides.get("memory_discipline", "normal"),
+        "scope_id": config.get("scope_id"),
+        "scope_name": config.get("scope_name"),
     }
 
     out_path = Path(args.output)
@@ -423,12 +452,14 @@ def main():
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
     # Print summary to stderr for wake.log capture
+    scope_suffix = f" scope={result['scope_id']}({result['scope_name']})" if result.get("scope_id") else ""
     print(
         f"session_type={session_type} source={resolution_source} "
         f"queue_reason={queue_reason!r} "
         f"prompt={'yes' if prompt_content else 'no'} "
         f"context_files={len(context_files)} "
-        f"memory_discipline={result['memory_discipline']}",
+        f"memory_discipline={result['memory_discipline']}"
+        f"{scope_suffix}",
         file=sys.stderr,
     )
 

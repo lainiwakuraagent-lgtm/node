@@ -500,6 +500,12 @@ def main():
     parser.add_argument("--db", default=str(DB_PATH), help="DB path")
     args = parser.parse_args()
 
+    # Augment session_type with maintenance scope tag if applicable.
+    if args.session_type == "maintenance":
+        _scope = os.environ.get("MAINTENANCE_SCOPE", "").strip()
+        if _scope:
+            args.session_type = f"maintenance:scope{_scope}"
+
     db_path = Path(args.db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 

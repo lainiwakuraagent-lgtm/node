@@ -1,0 +1,20 @@
+scope_id: 3
+scope_name: "Infrastructure & Integrations"
+
+context_files:
+  - memory/latest_summary.md
+  - memory/learnings_digest.md
+  - logs/system_issues.md
+  - logs/maintenance_decisions.md
+  - state/behavioral_context.txt
+
+focus_hint: >
+  Infrastructure & Integrations maintenance. Check all systemd services:
+  conversation.service, outbox-drain.service, file-watcher.path, emergency-agent.timer,
+  night-agent.timer. Verify Nexus connectivity via tools/check_nexus.sh.
+  Check GitHub PAT validity with curl before assuming it is live.
+  Verify Telegram webhook health (no 409 Conflict, watcher responding).
+  Audit wake.sh gate state: is state/emergency_mode.active stale?
+  Check logs/wake.log size (rotation threshold: 1MB). Verify state/node_version.txt
+  matches actual blank_node HEAD. Goal: confirm the operational layer is actually
+  running correctly, not just assumed to be.

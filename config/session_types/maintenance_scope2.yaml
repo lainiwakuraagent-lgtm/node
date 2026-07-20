@@ -1,0 +1,19 @@
+scope_id: 2
+scope_name: "Code & Architecture"
+
+context_files:
+  - memory/latest_summary.md
+  - memory/learnings_digest.md
+  - state/behavioral_context.txt
+  - prompts/wrapper_prompt.md
+  - logs/maintenance_decisions.md
+  - memory/work/neld_architecture_digest.md
+
+focus_hint: >
+  Code & Architecture maintenance. Run tools/drift_report.py to surface blank_node divergence.
+  Audit prompts/wrapper_prompt.md accuracy and goal.txt vs Loom active goal.
+  Check config/session_types/*.yaml for stale context_files references.
+  Run scripts/tag_skill_lookup.py --validate-all to catch broken SOP resolution.
+  Scan for any miniconda3 path references in scripts (known landmine).
+  Review logs/maintenance_decisions.md for proposed code changes that have drifted.
+  Goal: clean execution layer with no silent gaps between blank_node and agent_project.
