@@ -1,0 +1,31 @@
+%% Flow: incoming Telegram message routing
+%% Last updated: 2026-07-12
+sequenceDiagram
+    participant U as Andrii
+    participant TG as Telegram API
+    participant TW as telegram_watcher.py
+    participant CD as command_dispatcher.py
+    participant C as claude -p (conv)
+    participant IB as inbox/pending.json
+    participant W as Execution Session
+
+    U->>TG: sends message
+    TW->>TG: getUpdates (long-poll)
+    TG-->>TW: message
+
+    alt starts with /
+        TW->>CD: dispatch command
+        CD-->>TW: response text
+        TW->>TG: sendMessage (reply)
+    else chat message
+        TW->>C: pass to conversational agent
+        C->>C: generate response
+        C-->>TW: response text
+        TW->>TG: sendMessage (reply)
+
+        alt task_request or idea
+            C->>IB: inbox_append.py (write pending.json)
+            Note over IB,W: Next execution session reads inbox_startup.py
+            W->>IB: inbox_startup.py → creates Loom task
+        end
+    end

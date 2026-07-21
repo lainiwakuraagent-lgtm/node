@@ -1,0 +1,62 @@
+%% Container level (C4 L2): major pieces inside @Lain node.
+%% Last updated: 2026-07-21
+flowchart TB
+    subgraph Scheduler
+        NT[night-agent.timer\n30s poller — always running]
+        ET[emergency-agent.timer\nevery N min when active]
+        MT[session_trigger_server.py\nport 8766]
+    end
+
+    subgraph ExecPipeline["Execution Pipeline"]
+        WS[wake.sh\ngates + pre-launch]
+        GS[gcal_sync.py\nGCal → session_schedule.json\nrate-limited 15 min]
+        SP[resolve_session_type.py\ntype resolution\nphilosophy→creative→blocker→cap]
+        CL[claude -p\nwrapper_prompt.md]
+        WS --> GS --> SP --> CL
+    end
+
+    subgraph ConvLayer["Conversational Layer"]
+        CS[conversation.service]
+        CVS[conversation.sh\nwebhook mgmt + restart loop]
+        TW[telegram_watcher.py\ngetUpdates long-poll]
+        CD[command_dispatcher.py\n/status /report /context etc]
+        TTS[fish_tts_send.sh\nFish Audio TTS → voice note]
+        CS --> CVS --> TW
+        TW --> CD
+        TW --> TTS
+    end
+
+    subgraph Memory
+        MEM[memory/\nlatest_summary, progress,\nlearnings, sessions, work/]
+        STATE[state/\nbehavioral_context, loom_context,\nconsecutive_philosophy.count,\nreports/, conversation/]
+        INBOX[inbox/pending.json\nconv→exec handoff]
+        LOGS[logs/\nwake.log, session_log.csv, analytics.db]
+        SCHED[config/session_schedule.json\nactive window config\nwritten by gcal_sync]
+    end
+
+    subgraph Integrations
+        LOOM[(Loom DB)]
+        NEXUS[(Nexus)]
+        TG[(Telegram API)]
+        GCAL[(Google Calendar API\nidentity/gcal_token.json)]
+    end
+
+    NT --> WS
+    ET --> WS
+    MT --> WS
+
+    GS --> GCAL
+    GS --> SCHED
+    WS --> SCHED
+
+    CL --> MEM
+    CL --> STATE
+    CL --> LOGS
+    CL --> LOOM
+    CL --> NEXUS
+
+    TW --> INBOX
+    CL --> INBOX
+
+    TW --> TG
+    CD --> TG

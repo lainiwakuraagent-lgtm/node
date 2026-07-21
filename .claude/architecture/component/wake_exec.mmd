@@ -1,0 +1,37 @@
+%% Component: wake.sh execution pipeline — gate chain + pre-launch.
+%% This is the most complex single file in the node. Shows internal gate logic.
+%% Last updated: 2026-07-21
+stateDiagram-v2
+    [*] --> Gate0_Usage: timer/trigger fires
+    Gate0_Usage --> Abort: usage exceeded
+    Gate0_Usage --> ModeCheck: usage ok
+
+    ModeCheck --> GCalSync: TRIGGER_MODE=nightly
+    ModeCheck --> Gate4_Lock: TRIGGER_MODE=emergency or manual
+
+    GCalSync --> Gate1_EmergencyFlag: gcal_sync.py (rate-limited, non-fatal)\nupdates session_schedule.json from Google Calendar
+    Gate1_EmergencyFlag --> Abort: emergency_mode.active exists
+    Gate1_EmergencyFlag --> Gate2_Window: flag absent
+
+    Gate2_Window --> Abort: outside all windows in session_schedule.json\nor no trigger match + lock exists
+    Gate2_Window --> Gate4_Lock: trigger match or consecutive_run
+
+    Gate4_Lock --> Abort: session.lock held
+    Gate4_Lock --> PreLaunch: lock acquired
+
+    PreLaunch --> PreLaunch_JWT: write lock, increment counter
+    PreLaunch_JWT --> PreLaunch_Behavior: nexus JWT refresh (non-fatal)
+    PreLaunch_Behavior --> PreLaunch_SessionType: behavioral_adapter.py → behavioral_context.txt
+    PreLaunch_SessionType --> Gate_PhilosophyCap: resolve_session_type.py reads\nconsecutive_philosophy.count
+    Gate_PhilosophyCap --> Abort: philosophy_cap (count≥3)\nskip launch, save cost
+    Gate_PhilosophyCap --> PreLaunch_Loom: type ok (philosophy/creative/blocker\nor non-philosophy)
+    PreLaunch_Loom --> Launch: loom session start → current_loom_session_id.txt
+
+    Launch --> PostSession: claude -p (blocks until session exits)
+
+    PostSession --> PostSession_PhilosophyCount: increment consecutive_philosophy.count\nor reset to 0 if non-philosophy
+    PostSession_PhilosophyCount --> PostSession_Relationship: relationship_update.py (non-fatal)
+    PostSession_Relationship --> Cleanup: remove session.lock
+
+    Abort --> [*]
+    Cleanup --> [*]
