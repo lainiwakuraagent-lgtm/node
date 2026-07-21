@@ -1,0 +1,28 @@
+%% Component: reporting and analytics suite.
+%% Written by the agent at session close; surfaced to owner via /report command.
+flowchart TD
+    SessionClose([Session close\nShutdown sequence])
+
+    subgraph Analytics["Session analytics"]
+        AW[analytics_write.py\nwrites to logs/analytics.db\nsession_type exit_reason\ntasks_completed context_pct\nupserts on session_key]
+        SS[session_stats.py\naggregates analytics.db\nsummary stats across dates]
+    end
+
+    subgraph Reports["Session reports"]
+        SR[session_report.py\ngenerates state/reports/\nYYYY-MM-DD_N.md\nalso refreshes latest report]
+        RA[report_archive.py\nFTS index into\nstate/report_archive.db\nenables /report search QUERY]
+        SR --> RA
+    end
+
+    subgraph OwnerFacing["Owner-facing summaries"]
+        OB[owner_brief.py\nbriefing for returning owner\nsurfaces blockers + progress\nTriggered by /report]
+        DD[daily_digest.py\ndaily summary of activity\ncross-session overview]
+        SD[session_digest.py\nmulti-session digest\ndate range summary]
+        MR[milestone_report.py\nLoom milestone progress\nshows completion %]
+        DR[drift_report.py\ndetects when agent has\ndrifted from stated goal]
+        EQ[escalate_questions.py\nsurfaces stalled questions\nto owner for unblocking]
+        RG[recap_generator.py\nconversation recap\nfor session handoffs]
+    end
+
+    SessionClose --> AW
+    SessionClose --> SR

@@ -1,58 +1,53 @@
-%% Flow: execution session lifecycle — from timer fire to shutdown
-%% Last updated: 2026-07-21
+%% Flow: execution session lifecycle — timer fire to clean shutdown.
+%% Last updated: 2026-07-21 (Nexus JWT removed)
 sequenceDiagram
     participant T as Timer/Trigger
     participant W as wake.sh
-    participant GCal as Google Calendar API
     participant G as Gate Chain
     participant P as Pre-launch
     participant C as claude -p
-    participant M as Memory
+    participant M as Memory/State
 
-    T->>W: fire (nightly/emergency/manual)
+    T->>W: fire (nightly / emergency / manual)
     W->>G: Gate 0: check_usage.sh
     alt usage exceeded
         G-->>W: abort
     end
 
     alt TRIGGER_MODE=nightly
-        W->>GCal: gcal_sync.py — fetch events (skip if <15 min since last sync)
-        GCal-->>W: write config/session_schedule.json
         W->>G: Gate 1: emergency_mode.active flag
-        W->>G: Gate 2: window + trigger check vs session_schedule.json
+        W->>G: Gate 2: window + trigger vs session_schedule.json
         alt outside windows or locked
             G-->>W: abort
         end
     end
 
-    W->>G: Gate 4 (all): session.lock
+    W->>G: Gate 4 (all modes): session.lock
     alt locked
         G-->>W: abort
     end
 
-    W->>P: increment counter, write lock
-    P->>P: nexus JWT refresh
+    W->>P: write lock, increment counter
     P->>P: behavioral_adapter.py → behavioral_context.txt
-    P->>P: resolve_session_type.py → reads consecutive_philosophy.count\n→ selects philosophy/philosophy_creative/philosophy_blocker/philosophy_cap
-    alt philosophy_cap (count≥3)
-        P-->>W: abort — skip Claude launch
+    P->>P: resolve_session_type.py → session type + augmented goal
+    alt philosophy_cap (consecutive ≥ 3)
+        P-->>W: abort — skip launch
     end
     P->>P: loom session start → current_loom_session_id.txt
 
     P->>C: launch with augmented goal + persona
     C->>M: read latest_summary.md + learnings_digest.md
-    C->>C: orient, choose execution/planning type
-    C->>C: work tasks (check context + time between tasks)
+    C->>C: orient → work tasks (check context/time between tasks)
 
     C->>M: write latest_summary.md (HOT STATE)
     C->>M: update progress.md, learnings.md, index.md
     C->>M: write sessions/YYYY-MM-DD_N.md
     C->>M: append session_log.csv
-    C->>M: write analytics.db (analytics_write.py)
-    C->>M: write state/reports/ (session_report.py)
+    C->>M: analytics_write.py → analytics.db
+    C->>M: session_report.py → state/reports/
     C->>M: loom session end --handoff
 
     C-->>W: exit
-    W->>W: update consecutive_philosophy.count\n(increment if philosophy*, reset otherwise)
-    W->>W: relationship_update.py (post-session)
+    W->>W: update consecutive_philosophy.count
+    W->>W: relationship_update.py (post-session, non-fatal)
     W->>W: remove session.lock

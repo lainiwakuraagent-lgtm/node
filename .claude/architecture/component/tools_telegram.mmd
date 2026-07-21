@@ -1,0 +1,26 @@
+%% Component: Telegram communication toolchain.
+%% All tools are optional — agent works headless without them.
+flowchart TD
+    Owner([Owner\nvia Telegram])
+
+    subgraph Polling["Conversational mode (conversation.sh)"]
+        TW[telegram_watcher.py\ngetUpdates long-poll\nroutes messages + outbox]
+        CD[command_dispatcher.py\nhandles /commands\n/status /goal /log /report\n/reset /control /analytics]
+        TW -->|/command| CD
+        CD -->|reply| TW
+    end
+
+    subgraph Push["Execution layer push"]
+        TS[telegram_send.sh\nsend message to owner\nmulti-source token resolution\nSKIP_TTS flag support]
+        OS[outbox_send.py\nqueue async message\nfor next watcher cycle\ntype: message or question]
+        OD[outbox_drain.py\ndrains outbox.json\nroutes to telegram_send.sh\nrun by watcher or systemd]
+        OS --> OD --> TS
+    end
+
+    subgraph Legacy["Legacy / webhook mode"]
+        CR[check_replies.sh\nreads reply.txt +\ntelegram_incoming.txt\ndispatches /commands]
+    end
+
+    Owner <-->|messages| TW
+    TW -->|forward_outbox| OD
+    TW -->|reply| Owner

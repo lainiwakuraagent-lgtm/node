@@ -1,0 +1,26 @@
+%% Component: operational and scheduling tools.
+%% Used by agent during sessions or by owner to manage the node.
+flowchart TD
+    subgraph ModeControl["Mode control (owner-operated)"]
+        EM[enable_emergency_mode.sh\ninstalls emergency timer\nwrites emergency_mode.active\nblocks nightly sessions]
+        DM[disable_emergency_mode.sh\nremoves emergency timer\ndeletes active flag\nresumes nightly schedule]
+        STS[session_trigger_server.py\nHTTP server on port 8766\nreceives manual trigger\nsets TRIGGER_MODE=manual]
+    end
+
+    subgraph GoalMgmt["Goal management"]
+        GS[goal_switch.sh\nswitch active Loom goal\nupdates loom_context.json\nsurfaces handoff note]
+        LM[loom.sh\nLoom CLI wrapper\nshorthand for common\nloom commands]
+    end
+
+    subgraph Scheduling["Session scheduling"]
+        SO[schedule_one_off.py\nadd a one-off session\nto config/session_schedule.json\nfires once then marks fired]
+        SA[schedule_analytics.py\nanalyze schedule quality\nsession gap distribution\nwindow utilization stats]
+        FI[scan_file_inbox.py\nscan inbox/files/\nfor dropped files\nroutes to agent inbox]
+    end
+
+    subgraph Health["Health and memory"]
+        HC[health_check.sh\nverify all systemd units\ncheck Telegram token\ncheck Loom DB\ncheck log sizes]
+        MS[memory_search.py\nsearch memory/ files\nby keyword or date\nfor agent orientation]
+        IC[index_check.py\nverify memory/index.md\nmatches actual files\nin memory/work/]
+        NT[notify_task_complete.py\nchecks Loom for tasks\ndone with priority≥7\nwrites outbox entry]
+    end

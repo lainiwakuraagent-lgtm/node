@@ -1,0 +1,29 @@
+%% Component: behavioral engine — relationship tracking + tone calibration.
+%% Runs post-session (wake.sh) and pre-session (behavioral_adapter.py).
+flowchart TD
+    SessionLog[logs/session_log.csv\nappended each session]
+    WakeLog[logs/wake.log\nlast 60 lines piped\nto relationship_update]
+
+    subgraph RelEngine["Relationship engine (post-session)"]
+        RU[relationship_update.py\napplies time decay to\nTrust / Warmth / Friction\nclassifies events via\nheuristics or Claude API]
+        SC[significance_classifier.py\nweights events by impact\nused by relationship_update]
+        Profile[memory/work/musubi_data/\nusers/AGENT/OWNER.md\nMusubi-format profile]
+        RU --> SC
+        RU --> Profile
+    end
+
+    subgraph BehaviorGen["Behavioral context (pre-session)"]
+        BA[behavioral_adapter.py\nreads profile → computes\nDISCLOSURE_LEVEL\nWARMTH_EXPRESSION\nFRICTION_GUARD]
+        BC[state/behavioral_context.txt\ninjected into every session\nvia context_files list]
+        BA --> BC
+    end
+
+    subgraph Philosophy["Philosophy exploration"]
+        WM[wonder_module.py\n--wonder: create session file\n--check-triggers: surface\ninteresting Loom states\n--list: recent sessions]
+        WD[memory/work/wonder_sessions/\nYYYY-MM-DD_N.md\nfree-form exploration files]
+        WM --> WD
+    end
+
+    WakeLog --> RU
+    SessionLog --> WM
+    Profile --> BA

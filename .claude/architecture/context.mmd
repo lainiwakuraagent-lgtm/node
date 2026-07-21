@@ -1,34 +1,25 @@
-%% Context level (C4 L1): blank_node harness template (spawns named agent instances).
-%% Last updated: 2026-07-21
+%% Context level (C4 L1): blank_node harness template — where the agent fits.
+%% Last updated: 2026-07-21 (Nexus removed; Loom mandatory)
 flowchart TB
     Owner([Owner])
-    PeerAgent([Peer Agent])
 
-    subgraph LainNode["Agent Node (blank_node template)"]
+    subgraph Node["Agent Node (blank_node)"]
         Exec[Execution Sessions\nwake.sh + wrapper_prompt]
-        Conv[Conversational Layer\nconversation.service]
+        Conv[Conversational Layer\nconversation.sh]
     end
 
     Telegram[(Telegram\nBot API)]
-    Nexus[(Nexus Messenger\n100.110.36.84:8900)]
     Loom[(Loom DB\n~/.local/share/loom)]
-    GitHub[(GitHub\nlainiwakuraagent-lgtm/node)]
+    GitHub[(GitHub\ncode + CI)]
     Claude[(Claude API\nAnthropic)]
-    GCal[(Google Calendar\nAndrii's account)]
 
     Owner -->|commands / chat| Telegram
-    Owner -->|schedule windows| GCal
     Telegram -->|getUpdates| Conv
     Conv -->|reply| Telegram
 
-    PeerAgent -->|task delegation| Nexus
-    Exec -->|reads/writes| Nexus
-    Conv -->|reads| Nexus
-
     Exec -->|goals + tasks| Loom
+    Conv -->|inbox handoff| Exec
+
     Exec -->|code push + CI| GitHub
     Exec -->|LLM calls| Claude
     Conv -->|LLM calls| Claude
-
-    GCal -->|gcal_sync.py → session_schedule.json| Exec
-    Conv -->|inbox handoff| Exec
