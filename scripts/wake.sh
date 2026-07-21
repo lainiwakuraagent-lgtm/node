@@ -85,6 +85,7 @@ fi
 if [ "$last_recorded_night" != "$night_id" ]; then
   echo "0" > "$COUNT_FILE"
   echo "$night_id" > "$DATE_FILE"
+  echo "0" > "$STATE_DIR/consecutive_philosophy.count"
   log_line "New night detected ($night_id). Session counter reset to 0."
 fi
 current_count=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
@@ -404,6 +405,15 @@ except Exception:
     || cp "$GOAL_FILE" "$AUGMENTED_GOAL"
 
   rm -f "$SESSION_TYPE_RESULT"
+
+  # Gate: abort if consecutive philosophy cap reached (no Claude launch needed).
+  if [ "$CURRENT_SESSION_TYPE" = "philosophy_cap" ]; then
+    _consec=$(cat "$STATE_DIR/consecutive_philosophy.count" 2>/dev/null || echo "3")
+    log_line "ABORT: philosophy cap reached (consecutive_philosophy.count=$_consec). Skipping session."
+    rm -f "$AUGMENTED_GOAL"
+    exit 0
+  fi
+
   GOAL_FILE="$AUGMENTED_GOAL"
   log_line "Augmented goal built for session type: $CURRENT_SESSION_TYPE"
 else
@@ -525,6 +535,23 @@ duration_min=$(( (session_end_epoch - session_start_epoch) / 60 ))
 log_line "Session #$new_count ended. exit_code=$exit_code duration_min=$duration_min"
 rm -f "$session_prompt"
 [ -n "${AUGMENTED_GOAL:-}" ] && rm -f "$AUGMENTED_GOAL"
+
+# --- Update consecutive philosophy counter ---
+# philosophy* types increment; any other type resets to 0.
+_CONSEC_FILE="$STATE_DIR/consecutive_philosophy.count"
+case "${CURRENT_SESSION_TYPE:-}" in
+  philosophy*)
+    _prev=$(cat "$_CONSEC_FILE" 2>/dev/null || echo "0")
+    _next=$(( _prev + 1 ))
+    echo "$_next" > "$_CONSEC_FILE"
+    log_line "consecutive_philosophy.count: $_prev -> $_next"
+    ;;
+  *)
+    echo "0" > "$_CONSEC_FILE"
+    log_line "consecutive_philosophy.count reset to 0 (session_type=${CURRENT_SESSION_TYPE:-unknown})"
+    ;;
+esac
+unset _CONSEC_FILE _prev _next
 
 # --- Record session end in Loom (non-fatal) ---
 if [ -n "$LOOM_SESSION_ROW_ID" ] && [ -d "$LOOM_SRC" ] && [ -f "$LOOM_SRC/.venv/bin/python" ]; then

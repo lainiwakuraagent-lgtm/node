@@ -235,8 +235,25 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
         return "execution", "inbox_pending", \
             "inbox/pending.json has unprocessed task_request/bug_report/task_comment entries"
 
-    # Priority 4: default — empty queue means philosophy session
+    # Priority 4: default — empty queue means philosophy session.
+    # Select sub-mode based on consecutive philosophy session count.
+    consec = _read_consecutive_philosophy_count(project_dir)
+    if consec >= 3:
+        return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached"
+    if consec == 2:
+        return "philosophy_blocker", "default", f"consecutive_philosophy_count={consec}, blocker review mode"
+    if consec == 1:
+        return "philosophy_creative", "default", f"consecutive_philosophy_count={consec}, creative mode"
     return "philosophy", "default", ""
+
+
+def _read_consecutive_philosophy_count(project_dir: Path) -> int:
+    """Read state/consecutive_philosophy.count. Returns 0 if missing or unreadable."""
+    count_file = project_dir / "state" / "consecutive_philosophy.count"
+    try:
+        return max(0, int(count_file.read_text(encoding="utf-8").strip()))
+    except (FileNotFoundError, ValueError, OSError):
+        return 0
 
 
 def _inbox_has_pending_tasks(project_dir: Path) -> bool:
@@ -468,6 +485,7 @@ def main():
         "memory_discipline": behavioral_overrides.get("memory_discipline", "normal"),
         "scope_id": config.get("scope_id"),
         "scope_name": config.get("scope_name"),
+        "consecutive_philosophy_count": _read_consecutive_philosophy_count(project_dir),
     }
 
     out_path = Path(args.output)
