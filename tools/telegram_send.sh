@@ -13,17 +13,52 @@ set -euo pipefail
 # Allow CURL_CMD override for testing (e.g. CURL_CMD=/path/to/stub)
 CURL="${CURL_CMD:-curl}"
 
-ENV_FILE="$HOME/.claude/.env"
-TOKEN=$(grep 'TELEGRAM_BOT_TOKEN' "$ENV_FILE" | cut -d= -f2)
-CHAT_ID=$(grep 'TELEGRAM_ALLOWED_USERS' "$ENV_FILE" | cut -d= -f2)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+AGENT_ENV="$PROJECT_DIR/identity/agent.env"
+FALLBACK_ENV="$HOME/.claude/.env"
+
+# Token resolution (same priority as telegram_watcher.py):
+#   1. TELEGRAM_BOT_TOKEN_FILE env var → read from file
+#   2. TELEGRAM_BOT_TOKEN env var (direct)
+#   3. identity/agent.env → TELEGRAM_BOT_TOKEN
+#   4. ~/.claude/.env → TELEGRAM_BOT_TOKEN
+TOKEN=""
+if [[ -n "${TELEGRAM_BOT_TOKEN_FILE:-}" && -f "${TELEGRAM_BOT_TOKEN_FILE}" ]]; then
+    TOKEN=$(cat "$TELEGRAM_BOT_TOKEN_FILE" | tr -d '[:space:]')
+fi
+if [[ -z "$TOKEN" && -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
+    TOKEN="$TELEGRAM_BOT_TOKEN"
+fi
+if [[ -z "$TOKEN" && -f "$AGENT_ENV" ]]; then
+    TOKEN=$(grep '^TELEGRAM_BOT_TOKEN=' "$AGENT_ENV" 2>/dev/null | cut -d= -f2)
+fi
+if [[ -z "$TOKEN" ]]; then
+    TOKEN=$(grep 'TELEGRAM_BOT_TOKEN' "$FALLBACK_ENV" 2>/dev/null | cut -d= -f2)
+fi
+
+# Chat ID resolution:
+#   1. TELEGRAM_CHAT_ID env var (direct)
+#   2. identity/agent.env → TELEGRAM_CHAT_ID or TELEGRAM_ALLOWED_USERS
+#   3. ~/.claude/.env → TELEGRAM_ALLOWED_USERS
+CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+if [[ -z "$CHAT_ID" && -f "$AGENT_ENV" ]]; then
+    CHAT_ID=$(grep '^TELEGRAM_CHAT_ID=' "$AGENT_ENV" 2>/dev/null | cut -d= -f2)
+    if [[ -z "$CHAT_ID" ]]; then
+        CHAT_ID=$(grep '^TELEGRAM_ALLOWED_USERS=' "$AGENT_ENV" 2>/dev/null | cut -d= -f2)
+    fi
+fi
+if [[ -z "$CHAT_ID" ]]; then
+    CHAT_ID=$(grep 'TELEGRAM_ALLOWED_USERS' "$FALLBACK_ENV" 2>/dev/null | cut -d= -f2)
+fi
 
 if [[ -z "$TOKEN" ]]; then
-    echo "ERROR: TELEGRAM_BOT_TOKEN not found in $ENV_FILE" >&2
+    echo "ERROR: TELEGRAM_BOT_TOKEN not found (checked env vars, $AGENT_ENV, $FALLBACK_ENV)" >&2
     exit 2
 fi
 
 if [[ -z "$CHAT_ID" ]]; then
-    echo "ERROR: TELEGRAM_ALLOWED_USERS not found in $ENV_FILE" >&2
+    echo "ERROR: TELEGRAM_CHAT_ID not found (checked env vars, $AGENT_ENV, $FALLBACK_ENV)" >&2
     exit 2
 fi
 

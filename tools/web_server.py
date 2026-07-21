@@ -165,11 +165,15 @@ def _normalize_type(raw: str) -> str:
         return "aborted"
     if "emergency" in r:
         return "emergency"
-    if "planning" in r:
+    if "planning" in r or "architecture" in r:
         return "planning"
+    if "maintenance" in r:
+        return "maintenance"
+    if "philosophy" in r or "reflection" in r:
+        return "philosophy"
     if "free" in r or "explore" in r or "identity" in r:
         return "free"
-    if "execution" in r or "response" in r:
+    if "execution" in r or "response" in r or "manual" in r:
         return "execution"
     return "other"
 

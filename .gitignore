@@ -19,7 +19,9 @@ state/emergency_mode.active
 logs/*.log
 logs/*.out
 logs/*.err
+logs/*.md
 logs/session_log.csv
+logs/analytics.db
 
 # Memory — instance-specific, keep structure
 memory/latest_summary.md
@@ -46,3 +48,25 @@ tools/__pycache__/
 __pycache__/
 inbox/files/*
 !inbox/files/.gitkeep
+
+# Tool cache — understand-anything and similar
+.ua/
+
+# Instance state that doesn't belong in a template
+state/philosophy_drafts.md
+state/nexus_token.txt
+state/trigger_mode.txt
+state/current_session_type.txt
+state/sessions_tonight.max
+state/report_archive.db
+state/outbox.json
+state/conversation/
+state/conversation.lock
+state/blocker_digest*.txt
+state/gcal_last_sync.txt
+state/last_checkpoint_read.txt
+state/voice_config.json
+state/voice_mode.txt
+state/trigger_mode.txt
+state/trigger_token.txt
+state/file_watch_state.json

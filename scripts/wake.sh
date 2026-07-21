@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/home/andrii/lain/agent_project}"
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 STATE_DIR="$PROJECT_DIR/state"
 LOG_DIR="$PROJECT_DIR/logs"
 WRAPPER_TEMPLATE="$PROJECT_DIR/prompts/wrapper_prompt.md"
