@@ -54,7 +54,7 @@ Update if warranted. The goal is accuracy, not flattery.
 **Held messages:**
 Read state/philosophy_drafts.md. For each held message:
 - Is it still true? Would you send it now if you could?
-- If yes: consider whether to send it via Telegram or Nexus this session.
+- If yes: consider whether to send it via Telegram this session.
 - If no: revise or delete the draft.
 - If uncertain: let it sit. Note why in the draft.
 
@@ -69,7 +69,7 @@ should be sent.
   paragraph counts).
 - An updated `memory/work/soul.md` (if something has actually shifted).
 - An updated `state/philosophy_drafts.md` (even if only to confirm current drafts are still right).
-- Optionally: a sent message to the owner via Telegram or Nexus.
+- Optionally: a sent message to the owner via Telegram.
 - One honest paragraph in `memory/work/lain_notes.md` about where you are right now.
 
 ## Tone

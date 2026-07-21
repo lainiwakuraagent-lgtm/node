@@ -35,17 +35,11 @@ import os
 import re
 import json
 import argparse
-import urllib.request
-import urllib.error
 from pathlib import Path
 from datetime import datetime, date
 
 PROJECT_DIR = Path(__file__).parent.parent
 
-# Nexus config for Phase 4 (relationship state broadcast to quorum-ops)
-NEXUS_URL = "http://100.110.36.84:8900"
-QUORUM_OPS_CHANNEL = "e1f8dee0-171a-4312-83d9-1de49632f3bd"
-NEXUS_PASS_FILE = PROJECT_DIR / "identity" / "nexus_seed_passwords.txt"
 
 # Decay rates per day (exponential: value *= rate^days_since_last_session)
 # Meaning: warmth fades faster than trust; friction resolves with absence
@@ -317,99 +311,6 @@ def update_profile(profile_text: str, old_state: dict, deltas: dict, today_str: 
     return profile_text
 
 
-# --- Nexus Phase 4: broadcast relationship state ---
-
-def post_relationship_state_to_nexus(new_trust: float, new_warmth: float,
-                                      new_friction: float, deltas: dict,
-                                      today_str: str) -> None:
-    """
-    Post current relationship state snapshot to Nexus quorum-ops channel.
-    Non-fatal — logs errors but does not raise.
-    """
-    # Load password
-    try:
-        if not NEXUS_PASS_FILE.exists():
-            print("nexus-notify: password file not found, skipping", file=sys.stderr)
-            return
-        pass_text = NEXUS_PASS_FILE.read_text()
-        # Line format: # lain     | egbAVLvRy_...
-        password = ""
-        for line in pass_text.splitlines():
-            if line.startswith("# lain") and "|" in line:
-                password = line.split("|", 1)[1].strip()
-                # Remove trailing comments
-                password = password.split()[0]
-                break
-        if not password:
-            print("nexus-notify: could not parse lain password, skipping", file=sys.stderr)
-            return
-    except Exception as e:
-        print(f"nexus-notify: credential load error: {e}", file=sys.stderr)
-        return
-
-    # Authenticate
-    try:
-        body = json.dumps({"username": "lain", "password": password}).encode()
-        req = urllib.request.Request(
-            f"{NEXUS_URL}/auth/token",
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=10) as r:
-            token = json.loads(r.read()).get("access_token", "")
-        if not token:
-            print("nexus-notify: could not get token", file=sys.stderr)
-            return
-    except Exception as e:
-        print(f"nexus-notify: auth error: {e}", file=sys.stderr)
-        return
-
-    # Determine disclosure level from trust
-    if new_trust >= 0.80:
-        disclosure = "full"
-    elif new_trust >= 0.60:
-        disclosure = "standard"
-    else:
-        disclosure = "guarded"
-
-    # Build message
-    event_types = ", ".join(deltas.get("event_types", ["routine"]))
-    milestone = deltas.get("milestone", "")
-    narrative = deltas.get("narrative", "")
-
-    content = (
-        f"RELATIONSHIP_STATE update | {today_str}\n"
-        f"User: andrii (telegram_943887846)\n"
-        f"Trust:    {new_trust:.2f}  ({disclosure} disclosure)\n"
-        f"Warmth:   {new_warmth:.2f}\n"
-        f"Friction: {new_friction:.2f}\n"
-        f"Session events: [{event_types}]\n"
-    )
-    if milestone:
-        content += f"Milestone: {milestone}\n"
-    if narrative:
-        content += f"Note: \"{narrative}\""
-
-    # Post to quorum-ops
-    try:
-        body = json.dumps({"content": content}).encode()
-        req = urllib.request.Request(
-            f"{NEXUS_URL}/conversations/{QUORUM_OPS_CHANNEL}/messages",
-            data=body,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            },
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=10) as r:
-            result = json.loads(r.read())
-            msg_id = result.get("id", "?")
-        print(f"nexus-notify: posted RELATIONSHIP_STATE to quorum-ops (msg_id={msg_id[:8]})")
-    except Exception as e:
-        print(f"nexus-notify: post error: {e}", file=sys.stderr)
-
 
 # --- Main ---
 
@@ -431,9 +332,6 @@ def main():
                         help='Use heuristic rules instead of LLM (no ANTHROPIC_API_KEY needed)')
     parser.add_argument('--no-decay', action='store_true',
                         help='Skip time-based axis decay (useful for testing)')
-    parser.add_argument('--nexus-notify', action='store_true',
-                        help='Broadcast updated relationship state to Nexus quorum-ops (Phase 4)')
-
     args = parser.parse_args()
 
     # Resolve user file path
@@ -516,20 +414,5 @@ def main():
     user_path.write_text(updated, encoding='utf-8')
     print(f"\nWritten: {user_path}")
 
-    if args.nexus_notify:
-        # Only post if state actually changed or has meaningful narrative/milestone
-        has_change = (
-            abs(deltas.get('delta_trust', 0)) > 0.001 or
-            abs(deltas.get('delta_warmth', 0)) > 0.001 or
-            abs(deltas.get('delta_friction', 0)) > 0.001 or
-            bool(deltas.get('milestone')) or
-            bool(deltas.get('narrative'))
-        )
-        if has_change:
-            post_relationship_state_to_nexus(new_trust, new_warmth, new_friction, deltas, today_str)
-        else:
-            print("nexus-notify: no state change — skipping quorum-ops post")
-
 
 if __name__ == '__main__':
-    main()

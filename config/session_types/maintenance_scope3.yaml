@@ -10,8 +10,8 @@ context_files:
 
 focus_hint: >
   Infrastructure & Integrations maintenance. Check all systemd services:
-  conversation.service, outbox-drain.service, file-watcher.path, emergency-agent.timer,
-  night-agent.timer. Verify Nexus connectivity via tools/check_nexus.sh.
+  conversation.service, file-watcher.path, emergency-agent.timer,
+  night-agent.timer.
   Check GitHub PAT validity with curl before assuming it is live.
   Verify Telegram webhook health (no 409 Conflict, watcher responding).
   Audit wake.sh gate state: is state/emergency_mode.active stale?

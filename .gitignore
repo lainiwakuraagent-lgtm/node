@@ -4,9 +4,6 @@ state/sessions_tonight.date
 state/sessions_emergency.count
 state/sessions_manual.count
 state/lock
-state/nexus_lain_token.txt
-state/nexus_last_read.json
-state/nexus_conversation_state.json
 state/trigger_token.txt
 state/current_loom_session_id.txt
 state/loom_context.json
@@ -54,7 +51,6 @@ inbox/files/*
 
 # Instance state that doesn't belong in a template
 state/philosophy_drafts.md
-state/nexus_token.txt
 state/trigger_mode.txt
 state/current_session_type.txt
 state/sessions_tonight.max

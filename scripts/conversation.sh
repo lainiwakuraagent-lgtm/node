@@ -22,8 +22,6 @@ PERSONA_FILE="$PROJECT_DIR/prompts/persona.txt"
 LOCK_FILE="$STATE_DIR/conversation.lock"
 WATCHER_PID_FILE="$CONV_DIR/watcher.pid"
 AGENT_NAME="${AGENT_NAME:-lain}"
-NEXUS_URL="${NEXUS_URL:-http://100.110.36.84:8900}"
-NEXUS_PASS_FILE="$PROJECT_DIR/identity/nexus_seed_passwords.txt"
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "$CONV_DIR"
 
@@ -101,23 +99,6 @@ else
     MODEL="claude-sonnet-4-6"
 fi
 
-refresh_nexus_jwt() {
-    if [ ! -f "$NEXUS_PASS_FILE" ]; then return; fi
-    local _pass _token
-    _pass=$(grep "^# ${AGENT_NAME}" "$NEXUS_PASS_FILE" | grep -o '[^ ]*$' | head -1)
-    _token=$(curl -s --max-time 5 -X POST "${NEXUS_URL}/auth/token" \
-        -H "Content-Type: application/json" \
-        -d "{\"username\":\"${AGENT_NAME}\",\"password\":\"$_pass\"}" \
-        | /usr/bin/python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('access_token',''))" \
-        2>/dev/null || echo "")
-    if [ -n "$_token" ]; then
-        echo "$_token" > "$STATE_DIR/nexus_${AGENT_NAME}_token.txt"
-        log_line "CONV: Nexus JWT refreshed."
-    else
-        log_line "CONV: WARNING — Nexus JWT refresh failed (non-fatal)."
-    fi
-}
-
 kill_stale_watcher() {
     if [ -f "$WATCHER_PID_FILE" ]; then
         local watcher_pid
@@ -132,9 +113,6 @@ kill_stale_watcher() {
     fi
 }
 
-# Refresh JWT at script startup (before first loop — may be stale if service just started)
-refresh_nexus_jwt
-
 # --- Auto-restart loop ---
 RESTART_COUNT=0
 while true; do
@@ -144,7 +122,6 @@ while true; do
     # Each new session starts with a clean slate — conv_idle_check.py will
     # write a fresh signal if the session actually goes idle.
     rm -f "$CONV_DIR/reset_signal.txt"
-    refresh_nexus_jwt
     log_line "CONV: Session start #$RESTART_COUNT"
 
     SESSION_OUT="$LOG_DIR/conversation_$(date +%Y-%m-%d)_${RESTART_COUNT}.out"
@@ -164,20 +141,12 @@ while true; do
         cp "$PROMPT_FILE" "$SESSION_PROMPT"
     fi
 
-    # Start background JWT refresher — token expires in ~1h, refresh every 45min
-    ( while true; do sleep 2700; refresh_nexus_jwt; done ) &
-    JWT_REFRESH_PID=$!
-
     # Launch Claude Code in conversation mode
     claude \
         --model "$MODEL" \
         --dangerously-skip-permissions \
         -p "$(cat "$SESSION_PROMPT")" \
         > "$SESSION_OUT" 2> "$SESSION_ERR" || true
-
-    # Stop background refresher now that Claude has exited
-    kill "$JWT_REFRESH_PID" 2>/dev/null || true
-    wait "$JWT_REFRESH_PID" 2>/dev/null || true
 
     rm -f "$SESSION_PROMPT"
 

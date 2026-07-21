@@ -1,4 +1,0 @@
-{
-  "_comment": "Maps agent names to Nexus conversation IDs for outbox routing. Populate after Nexus is set up.",
-  "example_agent": "replace-with-nexus-conversation-uuid"
-}

@@ -26,7 +26,6 @@ AGENT_NAME="${AGENT_NAME:-lain}"
 OWNER_NAME="${OWNER_NAME:-andrii}"
 AGENT_REPO="${AGENT_REPO:-lainiwakuraagent-lgtm/node}"
 NODE_VERSION="${NODE_VERSION:-claude-sonnet-4-6}"
-NEXUS_URL="${NEXUS_URL:-http://100.110.36.84:8900}"
 
 GOAL_FILE="${1:?Usage: wake.sh <goal_file> [persona_file]}"
 PERSONA_FILE="${2:-}"
@@ -476,23 +475,6 @@ echo "$session_start_epoch" > "$STATE_DIR/session_start_epoch"
 echo $$ > "$LOCK_FILE"
 trap 'rm -f "$LOCK_FILE"' EXIT
 
-# --- Refresh Nexus JWT token (non-fatal) ---
-# Keeps state/nexus_lain_token.txt fresh so Lain can use it immediately each session.
-NEXUS_PASS_FILE="$PROJECT_DIR/identity/nexus_seed_passwords.txt"
-if [ -f "$NEXUS_PASS_FILE" ]; then
-  _nexus_pass=$(grep "^# ${AGENT_NAME}" "$NEXUS_PASS_FILE" | grep -o '[^ ]*$' | head -1)
-  _nexus_token=$(curl -s --max-time 5 -X POST "${NEXUS_URL}/auth/token" \
-    -H "Content-Type: application/json" \
-    -d "{\"username\":\"${AGENT_NAME}\",\"password\":\"$_nexus_pass\"}" \
-    | /usr/bin/python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('access_token',''))" \
-    2>/dev/null || echo "")
-  if [ -n "$_nexus_token" ]; then
-    echo "$_nexus_token" > "$STATE_DIR/nexus_${AGENT_NAME}_token.txt"
-    log_line "Nexus JWT refreshed."
-  else
-    log_line "WARNING: Nexus JWT refresh failed (non-fatal) — nexus may be down or password changed."
-  fi
-fi
 
 # --- Generate behavioral context snapshot (non-fatal) ---
 BEHAVIORAL_TOOL="$PROJECT_DIR/tools/behavioral_adapter.py"
@@ -571,8 +553,8 @@ REL_PROFILE="$PROJECT_DIR/memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NA
 if [ -f "$REL_TOOL" ] && [ -f "$REL_PROFILE" ]; then
   tail -60 "$LOG_DIR/wake.log" | /usr/bin/python3 "$REL_TOOL" \
     --user-file "$REL_PROFILE" \
-    --heuristic --stdin --nexus-notify > /dev/null 2>&1 \
-    && log_line "Relationship state updated + broadcast to Nexus quorum-ops." \
+    --heuristic --stdin > /dev/null 2>&1 \
+    && log_line "Relationship state updated." \
     || log_line "WARNING: relationship_update.py failed (non-fatal)."
 fi
 

@@ -52,25 +52,6 @@ def send_telegram(chat_id: str, content: str) -> bool:
         return False
 
 
-def send_nexus(convo_id: str, content: str) -> bool:
-    try:
-        proc = subprocess.run(
-            ["bash", str(SCRIPT_DIR / "nexus_send.sh"), convo_id],
-            input=content, text=True, capture_output=True, timeout=35,
-        )
-        if proc.returncode != 0:
-            log(f"nexus send failed (rc={proc.returncode}): {proc.stderr[:200]}")
-            return False
-        return True
-    except Exception as e:
-        log(f"nexus send error: {e}")
-        return False
-
-
-SENDERS = {"telegram": lambda r, c: send_telegram(r["chat_id"], c),
-           "nexus":    lambda r, c: send_nexus(r["convo_id"], c)}
-
-
 def drain(dry_run: bool = False) -> int:
     if not OUTBOX_FILE.exists():
         return 0

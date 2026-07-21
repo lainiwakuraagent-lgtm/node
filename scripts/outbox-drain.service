@@ -1,9 +1,0 @@
-[Unit]
-Description=@Lain outbox drain — routes pending messages
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 /home/andrii/lain/agent_project/tools/outbox_drain.py
-WorkingDirectory=/home/andrii/lain/agent_project
-Environment=HOME=/home/andrii

@@ -98,7 +98,7 @@ Run these in order, every single wake, before touching the goal:
    ```
    **If CONV_ACTIVE=1**: Do NOT send any unsolicited Telegram messages this session —
    no startup greeting, no status updates, no completion pings.
-   Work silently: write only to memory files, Loom, Nexus, and logs.
+   Work silently: write only to memory files, Loom, and logs.
    The conversational layer is handling all human-facing communication right now.
    **If CONV_ACTIVE=0**: Proceed as normal.
 

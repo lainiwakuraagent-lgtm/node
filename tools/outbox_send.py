@@ -3,7 +3,7 @@
 outbox_send.py — Write a typed entry to state/conversation/outbox.json.
 
 Used by the execution layer to proactively push messages or questions to
-Andrii (via Telegram) or other agents (via Nexus DM), without directly
+Andrii (via Telegram) without directly
 touching those APIs. The conversational layer (telegram_watcher.py) polls
 the outbox on each cycle and routes each entry based on type+to.
 
@@ -20,15 +20,12 @@ Schema:
     }
 
 Routing (done by telegram_watcher.py):
-    type=message  + to=owner         → Telegram
-    type=question + to=owner         → Telegram (prefixed "Question for you:")
-    type=message  + to=agent:<name>  → Nexus DM (conversation in nexus_routing.json)
-    type=question + to=agent:<name>  → Nexus DM (question framing)
+    type=message  + to=owner   → Telegram
+    type=question + to=owner   → Telegram (prefixed "Question for you:")
 
 Usage:
     python3 tools/outbox_send.py --content "message text"
     python3 tools/outbox_send.py --content "..." --type question --to owner
-    python3 tools/outbox_send.py --content "..." --type message --to agent:asuka
     echo "message text" | python3 tools/outbox_send.py
     python3 tools/outbox_send.py --check   # print pending count (for testing)
 """
