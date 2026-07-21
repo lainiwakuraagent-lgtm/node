@@ -16,9 +16,10 @@ decision analysis, write it inline in the wonder session file or in lain_notes.m
 """
 
 import argparse
+import csv
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
@@ -85,12 +86,24 @@ def check_triggers() -> list[dict]:
             })
 
         # Long stretches with no philosophy sessions
-        recent_philosophy = db.execute("""
-            SELECT COUNT(*) as n FROM loom_sessions
-            WHERE type = 'philosophy'
-              AND started_at > datetime('now', '-7 days')
-        """).fetchone()
-        if recent_philosophy and recent_philosophy["n"] == 0:
+        session_log = PROJECT_DIR / "logs" / "session_log.csv"
+        philosophy_count = 0
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        if session_log.exists():
+            with open(session_log, newline="") as f:
+                for row in csv.DictReader(f):
+                    if row.get("session_type") != "philosophy":
+                        continue
+                    ts_raw = row.get("timestamp", "")
+                    try:
+                        ts = datetime.fromisoformat(ts_raw)
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if ts > cutoff:
+                            philosophy_count += 1
+                    except ValueError:
+                        continue
+        if philosophy_count == 0:
             triggers.append({
                 "condition": "philosophy_gap",
                 "detail": "No philosophy sessions in 7 days — something may have been left unexamined"
