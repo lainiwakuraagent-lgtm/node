@@ -12,7 +12,7 @@ flowchart TD
     subgraph Inbox["Inbox processing (session start)"]
         IS[inbox_startup.py\nreads inbox/pending.json\ncreates Loom tasks from\ntask_request entries]
         IR[inbox_read.py\nread + prune entries\n--prune removes >7d old]
-        IA[inbox_append.py\nwrite new entry to\npending.json (conv layer)]
+        IA[inbox_append.py\nwrite new entry to\npending.json — used by conv layer]
     end
 
     WS -->|Gate 0| CU
