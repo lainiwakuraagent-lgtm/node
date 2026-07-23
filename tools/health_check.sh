@@ -9,7 +9,7 @@
 
 set -uo pipefail
 
-PROJECT_DIR="/home/andrii/lain/agent_project"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 PASS=0
@@ -47,9 +47,7 @@ echo ""
 echo "=== Critical files ==="
 
 for f in \
-  "$PROJECT_DIR/tools/check_time.sh" \
-  "$PROJECT_DIR/tools/check_context.sh" \
-  "$PROJECT_DIR/tools/check_usage.sh" \
+  "$PROJECT_DIR/tools/check_session.sh" \
   "$PROJECT_DIR/tools/health_check.sh" \
   "$PROJECT_DIR/scripts/wake.sh" \
   "$PROJECT_DIR/scripts/splice_prompt.py" \
@@ -79,9 +77,7 @@ echo ""
 echo "=== Executability ==="
 
 for f in \
-  "$PROJECT_DIR/tools/check_time.sh" \
-  "$PROJECT_DIR/tools/check_context.sh" \
-  "$PROJECT_DIR/tools/check_usage.sh" \
+  "$PROJECT_DIR/tools/check_session.sh" \
   "$PROJECT_DIR/tools/health_check.sh" \
   "$PROJECT_DIR/scripts/wake.sh"
 do
@@ -110,7 +106,7 @@ if [ -n "$PY3" ]; then
   pyver=$("$PY3" --version 2>&1)
   ok "Python found: $PY3 ($pyver)"
 else
-  fail "No working Python 3 found — check_context.sh and check_usage.sh will fail"
+  fail "No working Python 3 found — check_session.sh --context/--usage will fail"
 fi
 
 if [ "$PY3" != "/home/andrii/miniconda3/bin/python" ] && [ "$PY3" != "" ]; then
@@ -152,7 +148,7 @@ if [ -f "$CREDS_FILE" ]; then
     fi
   fi
 else
-  warn "credentials file not found at $CREDS_FILE — check_usage.sh will be unable to probe API"
+  warn "credentials file not found at $CREDS_FILE — check_session.sh --usage will be unable to probe API"
 fi
 
 # ─── 7. State files ───────────────────────────────────────────────────────────
@@ -216,7 +212,7 @@ done
 echo ""
 echo "=== Time window ==="
 
-time_out=$(bash "$PROJECT_DIR/tools/check_time.sh" 2>/dev/null)
+time_out=$(bash "$PROJECT_DIR/tools/check_session.sh" --time 2>/dev/null)
 in_window=$(echo "$time_out" | grep '^in_work_window:' | awk '{print $2}')
 mins_left=$(echo "$time_out" | grep '^minutes_remaining' | awk '{print $2}')
 
@@ -230,8 +226,9 @@ fi
 echo ""
 echo "=== Telegram webhook ==="
 
-export XDG_RUNTIME_DIR=/run/user/1001
-export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/1001/bus"
+_uid="$(id -u)"
+export XDG_RUNTIME_DIR="/run/user/${_uid}"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${_uid}/bus"
 
 if systemctl --user is-active telegram-webhook.service >/dev/null 2>&1; then
   ok "telegram-webhook.service is running"

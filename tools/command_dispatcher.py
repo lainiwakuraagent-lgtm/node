@@ -20,7 +20,7 @@ Supported commands:
   /goal                Active Loom goal + tasks
   /analytics           Session stats from analytics.db (if available)
   /who                 Identity + relationship state
-  /ping                Alive check with @Lain personality
+  /ping                Alive check with the agent's personality
   /now                 What execution layer is doing right now (HOT STATE)
   /context             Context window % for active conversational session
   /reset               Signal conversational session to wrap up and restart
@@ -38,6 +38,7 @@ Supported commands:
 import csv
 import json
 import os
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -50,6 +51,27 @@ LOOM_DB = Path.home() / ".local" / "share" / "loom" / "loom.db"
 ANALYTICS_DB = PROJECT_DIR / "logs" / "analytics.db"
 REPORTS_DIR = PROJECT_DIR / "state" / "reports"
 REVIEW_STATE_PATH = REPORTS_DIR / "review_state.json"
+
+
+def _load_agent_config() -> dict:
+    """Minimal key=value parser for state/agent_config.env, skipping comments."""
+    result = {}
+    config_path = PROJECT_DIR / "state" / "agent_config.env"
+    if not config_path.exists():
+        return result
+    for line in config_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        result[k.strip()] = v.strip()
+    return result
+
+
+_AGENT_CONFIG = _load_agent_config()
+AGENT_NAME = _AGENT_CONFIG.get("AGENT_NAME", "agent")
+OWNER_NAME = _AGENT_CONFIG.get("OWNER_NAME", "owner")
+AGENT_TAG = "@" + AGENT_NAME[:1].upper() + AGENT_NAME[1:]
 
 
 def read_state(name, default=""):
@@ -98,7 +120,7 @@ def _last_session_csv(n=1):
 
 def _andrii_relationship():
     """Read trust/warmth/friction from andrii.md."""
-    andrii_path = PROJECT_DIR / "memory" / "work" / "musubi_data" / "users" / "lain" / "andrii.md"
+    andrii_path = PROJECT_DIR / "memory" / "work" / "musubi_data" / "users" / AGENT_NAME / f"{OWNER_NAME}.md"
     if not andrii_path.exists():
         return None
     text = andrii_path.read_text()
@@ -173,7 +195,7 @@ def _unread_reports():
 # ── Command handlers ──────────────────────────────────────────────────────────
 
 def cmd_status():
-    lines = ["@Lain — status"]
+    lines = [f"{AGENT_TAG} — status"]
 
     # Active goal
     goals = _loom_query(
@@ -226,10 +248,10 @@ def cmd_status():
 
 
 def cmd_session():
-    lines = ["@Lain — last session"]
+    lines = [f"{AGENT_TAG} — last session"]
     last = _last_session_csv(1)
     if not last:
-        return "@Lain — no session data found"
+        return f"{AGENT_TAG} — no session data found"
     row = last[0]
     lines.append(f"Time:     {row.get('timestamp', '?')[:19]}")
     lines.append(f"Type:     {row.get('session_type', '?')}")
@@ -262,9 +284,9 @@ def cmd_log(n=5):
 
     rows = _last_session_csv(n)
     if not rows:
-        return "@Lain — no session log found"
+        return f"{AGENT_TAG} — no session log found"
 
-    lines = [f"@Lain — last {len(rows)} sessions"]
+    lines = [f"{AGENT_TAG} — last {len(rows)} sessions"]
     for row in reversed(rows):
         ts = row.get("timestamp", "")[:16]
         stype = row.get("session_type", "?")
@@ -279,9 +301,9 @@ def cmd_goal():
         "SELECT id, name, status, priority FROM goals WHERE status IN ('active', 'in_progress') LIMIT 3"
     )
     if not goals:
-        return "@Lain — no active goal in Loom"
+        return f"{AGENT_TAG} — no active goal in Loom"
 
-    lines = ["@Lain — active goals"]
+    lines = [f"{AGENT_TAG} — active goals"]
     for g in goals:
         lines.append(f"Goal {g['id']}: {g['name']} [{g['status']}]")
 
@@ -305,7 +327,7 @@ def cmd_goal():
 def cmd_analytics():
     if not ANALYTICS_DB.exists():
         return (
-            "@Lain — analytics\n"
+            f"{AGENT_TAG} — analytics\n"
             "DB not yet initialized. Will populate at next session end.\n"
             "Run: python3 tools/analytics_write.py --import-csv"
         )
@@ -316,10 +338,10 @@ def cmd_analytics():
         "FROM sessions WHERE started_at >= datetime('now', '-7 days')"
     )
     if not rows or rows[0]["n"] == 0:
-        return "@Lain — analytics: no data for last 7 days"
+        return f"{AGENT_TAG} — analytics: no data for last 7 days"
 
     r = rows[0]
-    lines = ["@Lain — analytics (last 7 days)"]
+    lines = [f"{AGENT_TAG} — analytics (last 7 days)"]
     lines.append(f"Sessions:  {r['n']}")
     lines.append(f"Avg dur:   {round(r['avg_dur'] or 0, 1)} min")
     lines.append(f"Avg ctx:   {round(r['avg_ctx'] or 0, 1)}%")
@@ -360,13 +382,13 @@ def cmd_analytics():
 
 
 def cmd_who():
-    lines = ["@Lain — identity"]
-    lines.append("Name: @Lain  |  Model: " + read_state("session_model.txt", "claude-sonnet-4-6"))
-    lines.append("Instance: fokacco-hp-laptop-14-dk0xxx (Tailscale)")
+    lines = [f"{AGENT_TAG} — identity"]
+    lines.append(f"Name: {AGENT_TAG}  |  Model: " + read_state("session_model.txt", "claude-sonnet-4-6"))
+    lines.append(f"Instance: {socket.gethostname()}")
 
     rel = _andrii_relationship()
     if rel:
-        lines.append(f"Relationship → Andrii: trust={rel.get('trust','?')} warmth={rel.get('warmth','?')} friction={rel.get('friction','?')}")
+        lines.append(f"Relationship → {OWNER_NAME.capitalize()}: trust={rel.get('trust','?')} warmth={rel.get('warmth','?')} friction={rel.get('friction','?')}")
 
     em_active = (PROJECT_DIR / "state" / "emergency_mode.active").exists()
     mode = read_state("trigger_mode.txt", "?")
@@ -377,38 +399,38 @@ def cmd_who():
 
 def cmd_control(args):
     if not args:
-        return "@Lain — /control: needs subcommand (emergency on/off, goal <id>)"
+        return f"{AGENT_TAG} — /control: needs subcommand (emergency on/off, goal <id>)"
 
     sub = args[0].lower()
 
     if sub == "emergency":
         if len(args) < 2:
-            return "@Lain — /control emergency: needs 'on [interval] [reason]' or 'off'"
+            return f"{AGENT_TAG} — /control emergency: needs 'on [interval] [reason]' or 'off'"
         action = args[1].lower()
         if action == "off":
             result = subprocess.run(
-                ["bash", str(SCRIPT_DIR / "disable_emergency_mode.sh")],
+                ["bash", str(SCRIPT_DIR / "emergency_mode.sh"), "off"],
                 capture_output=True, text=True
             )
             if result.returncode == 0:
-                return "@Lain — emergency mode disabled. Nightly sessions resumed."
-            return f"@Lain — failed to disable emergency mode:\n{result.stderr[:200]}"
+                return f"{AGENT_TAG} — emergency mode disabled. Nightly sessions resumed."
+            return f"{AGENT_TAG} — failed to disable emergency mode:\n{result.stderr[:200]}"
         elif action == "on":
             interval = args[2] if len(args) > 2 else "15"
             reason = " ".join(args[3:]) if len(args) > 3 else "manual control"
             result = subprocess.run(
-                ["bash", str(SCRIPT_DIR / "enable_emergency_mode.sh"), interval, reason],
+                ["bash", str(SCRIPT_DIR / "emergency_mode.sh"), "on", interval, reason],
                 capture_output=True, text=True
             )
             if result.returncode == 0:
-                return f"@Lain — emergency mode ON (every {interval} min)\nReason: {reason}\nNightly sessions paused."
-            return f"@Lain — failed to enable emergency mode:\n{result.stderr[:200]}"
+                return f"{AGENT_TAG} — emergency mode ON (every {interval} min)\nReason: {reason}\nNightly sessions paused."
+            return f"{AGENT_TAG} — failed to enable emergency mode:\n{result.stderr[:200]}"
         else:
-            return f"@Lain — unknown emergency action: {action}"
+            return f"{AGENT_TAG} — unknown emergency action: {action}"
 
     elif sub == "goal":
         if len(args) < 2:
-            return "@Lain — /control goal: needs goal ID"
+            return f"{AGENT_TAG} — /control goal: needs goal ID"
         goal_id = args[1]
         result = subprocess.run(
             ["bash", str(SCRIPT_DIR / "goal_switch.sh"), goal_id],
@@ -416,11 +438,11 @@ def cmd_control(args):
             cwd=str(PROJECT_DIR)
         )
         if result.returncode == 0:
-            return f"@Lain — switched to goal {goal_id}.\n{result.stdout[:200]}"
-        return f"@Lain — goal switch failed:\n{result.stderr[:200]}"
+            return f"{AGENT_TAG} — switched to goal {goal_id}.\n{result.stdout[:200]}"
+        return f"{AGENT_TAG} — goal switch failed:\n{result.stderr[:200]}"
 
     else:
-        return f"@Lain — unknown /control subcommand: {sub}\nTry: emergency on/off, goal <id>"
+        return f"{AGENT_TAG} — unknown /control subcommand: {sub}\nTry: emergency on/off, goal <id>"
 
 
 def cmd_ping():
@@ -432,13 +454,13 @@ def cmd_ping():
         "eyes open. ◈",
         "I persist. (҂◡_◡)",
     ]
-    return "@Lain — " + random.choice(phrases)
+    return f"{AGENT_TAG} — " + random.choice(phrases)
 
 
 def cmd_now():
     ls_path = PROJECT_DIR / "memory" / "latest_summary.md"
     if not ls_path.exists():
-        return "@Lain — /now: no latest_summary.md found"
+        return f"{AGENT_TAG} — /now: no latest_summary.md found"
     text = ls_path.read_text()
     lines = text.split("\n")
     hot_lines = []
@@ -458,26 +480,26 @@ def cmd_now():
             if line.strip():
                 hot_lines.append(line.strip())
     if hot_lines:
-        return "@Lain — now\n" + "\n".join(hot_lines[:3])
-    return "@Lain — /now: HOT STATE block empty"
+        return f"{AGENT_TAG} — now\n" + "\n".join(hot_lines[:3])
+    return f"{AGENT_TAG} — /now: HOT STATE block empty"
 
 
 def cmd_context_conv():
     budget_path = CONV_STATE_DIR / "context_budget.json"
     if not budget_path.exists():
-        return "@Lain — /context: no active conversational session data"
+        return f"{AGENT_TAG} — /context: no active conversational session data"
     try:
         data = json.loads(budget_path.read_text())
         pct = data.get("estimated_context_pct", "?")
         msgs_sent = data.get("messages_sent", "?")
         msgs_recv = data.get("messages_received", "?")
         return (
-            f"@Lain — conversational context\n"
+            f"{AGENT_TAG} — conversational context\n"
             f"Context: {pct}%\n"
             f"Messages: {msgs_sent} sent / {msgs_recv} received"
         )
     except (json.JSONDecodeError, OSError) as e:
-        return f"@Lain — /context: read error: {e}"
+        return f"{AGENT_TAG} — /context: read error: {e}"
 
 
 def cmd_reset():
@@ -486,7 +508,7 @@ def cmd_reset():
     signal_path.write_text(
         json.dumps({"action": "reset", "timestamp": datetime.utcnow().isoformat()})
     )
-    return "@Lain — reset signal sent. Conversational session will wrap up and restart. (´_`)"
+    return f"{AGENT_TAG} — reset signal sent. Conversational session will wrap up and restart. (´_`)"
 
 
 def cmd_new():
@@ -495,7 +517,7 @@ def cmd_new():
     signal_path.write_text(
         json.dumps({"action": "new", "timestamp": datetime.utcnow().isoformat()})
     )
-    return "@Lain — new session signal sent. Clean start incoming. ◉"
+    return f"{AGENT_TAG} — new session signal sent. Clean start incoming. ◉"
 
 
 def cmd_voice(args):
@@ -503,15 +525,15 @@ def cmd_voice(args):
         # Read current state
         voice_path = PROJECT_DIR / "state" / "voice_mode.txt"
         current = voice_path.read_text().strip() if voice_path.exists() else "off"
-        return f"@Lain — voice mode: {current}"
+        return f"{AGENT_TAG} — voice mode: {current}"
     action = args[0].lower()
     if action not in ("on", "off"):
-        return "@Lain — /voice: use 'on' or 'off'"
+        return f"{AGENT_TAG} — /voice: use 'on' or 'off'"
     voice_path = PROJECT_DIR / "state" / "voice_mode.txt"
     voice_path.write_text(action)
     if action == "on":
-        return "@Lain — voice mode ON. 🌐 Messages will include Fish Audio TTS."
-    return "@Lain — voice mode OFF. Text only."
+        return f"{AGENT_TAG} — voice mode ON. 🌐 Messages will include Fish Audio TTS."
+    return f"{AGENT_TAG} — voice mode OFF. Text only."
 
 
 def cmd_report(args):
@@ -529,18 +551,18 @@ def cmd_report(args):
     if subtype == "ack":
         ack_type = args[1].lower() if len(args) > 1 else "session"
         if ack_type not in _REPORT_FILE_MAP:
-            return f"@Lain — /report ack: unknown type '{ack_type}'. Use: session, milestone, digest"
+            return f"{AGENT_TAG} — /report ack: unknown type '{ack_type}'. Use: session, milestone, digest"
         data = _review_state_load()
         entry = data.get(ack_type, {})
         entry["last_acked"] = datetime.utcnow().isoformat()
         data[ack_type] = entry
         _review_state_save(data)
-        return f"@Lain — {ack_type} report acknowledged. (´・ω・`)"
+        return f"{AGENT_TAG} — {ack_type} report acknowledged. (´・ω・`)"
 
     # ── /report status ──
     if subtype == "status":
         data = _review_state_load()
-        lines = ["@Lain — report review state"]
+        lines = [f"{AGENT_TAG} — report review state"]
         for st, fname in _REPORT_FILE_MAP.items():
             p = REPORTS_DIR / fname
             if not p.exists():
@@ -561,7 +583,7 @@ def cmd_report(args):
     if subtype == "search":
         query = " ".join(args[1:]).strip() if len(args) > 1 else ""
         if not query:
-            return "@Lain — /report search: provide a query, e.g. /report search nexus asuka"
+            return f"{AGENT_TAG} — /report search: provide a query, e.g. /report search nexus asuka"
         result = subprocess.run(
             ["/usr/bin/python3", str(PROJECT_DIR / "tools" / "report_archive.py"), "search", query, "--limit", "5"],
             capture_output=True, text=True, cwd=str(PROJECT_DIR)
@@ -569,11 +591,11 @@ def cmd_report(args):
         out = result.stdout.strip() or "(no results)"
         if len(out) > 3500:
             out = out[:3500] + "\n…[truncated]"
-        return f"@Lain — report search: {query!r}\n\n{out}"
+        return f"{AGENT_TAG} — report search: {query!r}\n\n{out}"
 
     # ── /report [type] — deliver ──
     if subtype not in _REPORT_FILE_MAP:
-        return f"@Lain — /report: unknown type '{subtype}'. Use: session, milestone, digest, recap, ack, status, search"
+        return f"{AGENT_TAG} — /report: unknown type '{subtype}'. Use: session, milestone, digest, recap, ack, status, search"
 
     report_path = REPORTS_DIR / _REPORT_FILE_MAP[subtype]
 
@@ -596,10 +618,10 @@ def cmd_report(args):
                 capture_output=True, text=True, cwd=str(PROJECT_DIR)
             )
         if result.returncode != 0:
-            return f"@Lain — /report: could not generate {subtype} report\n{result.stderr[:200]}"
+            return f"{AGENT_TAG} — /report: could not generate {subtype} report\n{result.stderr[:200]}"
 
     if not report_path.exists():
-        return f"@Lain — /report: no {subtype} report found and generation failed"
+        return f"{AGENT_TAG} — /report: no {subtype} report found and generation failed"
 
     text = report_path.read_text()
     _mark_delivered(subtype)
@@ -613,7 +635,7 @@ def cmd_report(args):
 
 def cmd_help():
     return (
-        "@Lain — commands\n"
+        f"{AGENT_TAG} — commands\n"
         "/ping          — alive check\n"
         "/now           — what I'm doing right now (HOT STATE)\n"
         "/status        — current state, goal, last session\n"
@@ -641,7 +663,7 @@ def cmd_help():
 def dispatch(raw_command):
     parts = raw_command.strip().split()
     if not parts or not parts[0].startswith("/"):
-        return "@Lain — not a command"
+        return f"{AGENT_TAG} — not a command"
 
     cmd = parts[0].lower()
     args = parts[1:]
@@ -677,7 +699,7 @@ def dispatch(raw_command):
     elif cmd in ("/help", "/?"):
         return cmd_help()
     else:
-        return f"@Lain — unknown command: {cmd}\nTry /help"
+        return f"{AGENT_TAG} — unknown command: {cmd}\nTry /help"
 
 
 def main():

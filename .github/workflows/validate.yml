@@ -41,8 +41,7 @@ jobs:
             "tools/check_replies.sh"
             "tools/check_nexus.sh"
             "tools/telegram_send.sh"
-            "tools/check_context.sh"
-            "tools/check_time.sh"
+            "tools/check_session.sh"
             "prompts/wrapper_prompt.md"
             "state/agent_config.env.example"
           )

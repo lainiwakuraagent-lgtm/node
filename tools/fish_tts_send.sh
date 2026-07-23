@@ -91,16 +91,23 @@ fi
 
 AUDIO_FILE="/tmp/fish_tts_$$.${FORMAT}"
 
-# Fish Audio v1 TTS endpoint
+# Fish Audio v1 TTS endpoint.
+# TEXT is passed via stdin, never interpolated into the Python source --
+# embedding it directly (e.g. '''$TEXT''') let arbitrary text (a stray triple-quote,
+# or deliberately crafted content) break out of the string literal and execute as
+# Python. Confirmed exploitable: '''+__import__('os').system('...')+''' actually ran
+# during review. VOICE_ID/FORMAT come from local config files, not remote text, so
+# they're substituted directly.
 BODY=$(/usr/bin/python3 -c "
 import json, sys
+text = sys.stdin.read()
 print(json.dumps({
-    'text': '''$TEXT''',
+    'text': text,
     'reference_id': '$VOICE_ID',
     'format': '$FORMAT',
     'latency': 'normal',
 }))
-" 2>/dev/null)
+" <<< "$TEXT" 2>/dev/null)
 
 HTTP_STATUS=$(curl -s -o "$AUDIO_FILE" -w "%{http_code}" \
     -X POST \

@@ -9,7 +9,7 @@ sequenceDiagram
     participant M as Memory/State
 
     T->>W: fire (nightly / emergency / manual)
-    W->>G: Gate 0: check_usage.sh
+    W->>G: Gate 0: check_session.sh --usage
     alt usage exceeded
         G-->>W: abort
     end

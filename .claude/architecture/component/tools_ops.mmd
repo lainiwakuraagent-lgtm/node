@@ -2,8 +2,7 @@
 %% Used by agent during sessions or by owner to manage the node.
 flowchart TD
     subgraph ModeControl["Mode control (owner-operated)"]
-        EM[enable_emergency_mode.sh\ninstalls emergency timer\nwrites emergency_mode.active\nblocks nightly sessions]
-        DM[disable_emergency_mode.sh\nremoves emergency timer\ndeletes active flag\nresumes nightly schedule]
+        EM[emergency_mode.sh on|off\ninstalls/removes emergency timer\nwrites/deletes emergency_mode.active\nblocks or restores nightly sessions]
         STS[session_trigger_server.py\nHTTP server on port 8766\nreceives manual trigger\nsets TRIGGER_MODE=manual]
     end
 

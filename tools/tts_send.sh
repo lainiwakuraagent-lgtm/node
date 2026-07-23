@@ -10,7 +10,7 @@
 #   - ELEVENLABS_API_KEY in ~/.config/PAI/.env
 #   - TELEGRAM_BOT_TOKEN in ~/.claude/.env
 #   - LAIN_VOICE_ID set in identity/credentials.md or as env var
-#   - TELEGRAM_CHAT_ID: owner's chat_id (defaults to 943887846)
+#   - TELEGRAM_CHAT_ID: owner's chat_id (falls back to TELEGRAM_ALLOWED_USERS in ~/.claude/.env)
 #
 # Note: voice_id must be provided via LAIN_VOICE_ID env var or set in this script
 # once selected by owner. Until then, set LAIN_VOICE_ID before calling.
@@ -21,7 +21,13 @@ set -euo pipefail
 
 ELEVENLABS_KEY=$(grep 'ELEVENLABS_API_KEY' ~/.config/PAI/.env | cut -d= -f2)
 BOT_TOKEN=$(grep 'TELEGRAM_BOT_TOKEN' ~/.claude/.env | cut -d= -f2)
-CHAT_ID="${TELEGRAM_CHAT_ID:-943887846}"
+ALLOWED_USERS=$(grep 'TELEGRAM_ALLOWED_USERS' ~/.claude/.env 2>/dev/null | cut -d= -f2)
+CHAT_ID="${TELEGRAM_CHAT_ID:-$ALLOWED_USERS}"
+
+if [[ -z "$CHAT_ID" ]]; then
+    echo "ERROR: CHAT_ID not resolved (set TELEGRAM_CHAT_ID or TELEGRAM_ALLOWED_USERS in ~/.claude/.env)" >&2
+    exit 1
+fi
 
 # Voice ID — set via env var or replace this default once owner selects a voice
 VOICE_ID="${LAIN_VOICE_ID:-}"

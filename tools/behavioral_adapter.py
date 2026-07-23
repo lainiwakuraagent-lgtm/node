@@ -128,7 +128,7 @@ def friction_guard(friction: float) -> tuple[str, str]:
 
 # ── Context file generator ────────────────────────────────────────────────────
 
-def generate_context(state: dict) -> str:
+def generate_context(state: dict, source_name: str = "profile.md") -> str:
     """Produce the behavioral context text block."""
     trust    = state['trust']    if state['trust']    is not None else 0.50
     warmth   = state['warmth']   if state['warmth']   is not None else 0.30
@@ -142,7 +142,7 @@ def generate_context(state: dict) -> str:
 
     lines = [
         f'# Behavioral Context — generated {today}',
-        f'# Source: andrii.md  |  Trust={trust:.2f}  Warmth={warmth:.2f}  Friction={friction:.2f}',
+        f'# Source: {source_name}  |  Trust={trust:.2f}  Warmth={warmth:.2f}  Friction={friction:.2f}',
         '',
         f'DISCLOSURE_LEVEL: {d_level}',
         f'  {d_guide}',
@@ -189,7 +189,7 @@ def main():
         print('ERROR: could not parse Trust value from profile', file=sys.stderr)
         sys.exit(1)
 
-    context = generate_context(state)
+    context = generate_context(state, source_name=user_path.name)
 
     if args.dry_run:
         print(context)

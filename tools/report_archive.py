@@ -236,7 +236,7 @@ def cmd_get(conn: sqlite3.Connection, report_id: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Report archive — FTS5 search over @Lain session/milestone/digest reports"
+        description="Report archive — FTS5 search over session/milestone/digest reports"
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

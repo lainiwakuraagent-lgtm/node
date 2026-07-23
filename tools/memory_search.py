@@ -29,7 +29,7 @@ import sys
 import argparse
 from pathlib import Path
 
-PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", "/home/andrii/lain/agent_project"))
+PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path(__file__).resolve().parent.parent))
 MEMORY_DIR = PROJECT_DIR / "memory"
 
 SCOPES = {

@@ -12,9 +12,8 @@ flowchart TD
 
     subgraph Push["Execution layer push"]
         TS[telegram_send.sh\nsend message to owner\nmulti-source token resolution\nSKIP_TTS flag support]
-        OS[outbox_send.py\nqueue async message\nfor next watcher cycle\ntype: message or question]
-        OD[outbox_drain.py\ndrains outbox.json\nroutes to telegram_send.sh\nrun by watcher or systemd]
-        OS --> OD --> TS
+        OB[outbox.py send|drain|check\nqueue async messages\ndrain outbox.json via routing\ntype: message or question]
+        OB --> TS
     end
 
     subgraph Legacy["Legacy / webhook mode"]
@@ -22,5 +21,5 @@ flowchart TD
     end
 
     Owner <-->|messages| TW
-    TW -->|forward_outbox| OD
+    TW -->|forward_outbox| OB
     TW -->|reply| Owner

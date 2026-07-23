@@ -36,6 +36,23 @@ STATUS_ICON = {
 }
 
 
+def _load_agent_tag():
+    """Read AGENT_NAME from state/agent_config.env, default 'agent'."""
+    config_path = os.path.join(PROJECT_DIR, "state", "agent_config.env")
+    name = "agent"
+    if os.path.exists(config_path):
+        with open(config_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("AGENT_NAME="):
+                    name = line.split("=", 1)[1].strip()
+                    break
+    return "@" + name[:1].upper() + name[1:]
+
+
+AGENT_TAG = _load_agent_tag()
+
+
 def get_goals():
     """Return active (non-abandoned, non-completed) goals from Loom DB."""
     if not os.path.exists(LOOM_DB):
@@ -88,10 +105,10 @@ def get_recent_sessions(n):
 
 
 def get_recent_commits(n):
-    """Return last N git log --oneline entries from lain git root."""
+    """Return last N git log --oneline entries from this project's own repo."""
     try:
         result = subprocess.run(
-            ["git", "-C", os.path.expanduser("~/lain"), "log", "--oneline", f"-{n}"],
+            ["git", "-C", PROJECT_DIR, "log", "--oneline", f"-{n}"],
             capture_output=True, text=True,
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -141,7 +158,7 @@ def main():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     out = []
 
-    out.append(f"@Lain STATUS BRIEF — {now_str}")
+    out.append(f"{AGENT_TAG} STATUS BRIEF — {now_str}")
     out.append("=" * 50)
 
     # Goals
@@ -177,7 +194,7 @@ def main():
 
     # Recent commits
     commits = get_recent_commits(6)
-    out.append("\nRECENT COMMITS (lain repo):")
+    out.append("\nRECENT COMMITS (this repo):")
     if commits:
         for c in commits:
             out.append(f"  {c[:72]}")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-wonder_module.py — Open exploration module for @Lain philosophy sessions.
+wonder_module.py — Open exploration module for philosophy sessions.
 
 Invoked during philosophy sessions to create a raw wonder session file.
 The agent writes freely into the file — no template, no structure required.
@@ -155,7 +155,7 @@ def create_wonder_session(seed: str = "") -> Path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Wonder Module — open exploration for @Lain philosophy sessions"
+        description="Wonder Module — open exploration for philosophy sessions"
     )
     parser.add_argument("--wonder", action="store_true",
                         help="Create a raw wonder session file (philosophy mode)")

@@ -33,6 +33,20 @@ CONV_LOCK = PROJECT_DIR / "state" / "conversation.lock"
 EXIT_REASON_FILE = PROJECT_DIR / "state" / "conversation" / "exit_reason.txt"
 
 
+def _load_agent_name() -> str:
+    """Read AGENT_NAME from state/agent_config.env, default 'agent'."""
+    config_path = PROJECT_DIR / "state" / "agent_config.env"
+    if config_path.exists():
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("AGENT_NAME="):
+                return line.split("=", 1)[1].strip()
+    return "agent"
+
+
+AGENT_NAME = _load_agent_name()
+
+
 def is_conv_active() -> bool:
     """Return True if a conversational session is live (and not idle-closing)."""
     if not CONV_LOCK.exists():
@@ -139,7 +153,7 @@ def write_notification(outbox: list, tasks: list[dict], dry_run: bool) -> int:
         )
         entry = {
             "id": str(uuid.uuid4())[:8],
-            "from": "lain",
+            "from": AGENT_NAME,
             "type": "message",
             "to": "owner",
             "content": content,

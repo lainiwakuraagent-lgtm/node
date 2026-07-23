@@ -29,9 +29,7 @@ TRACKED_FILES = [
     "tools/check_nexus.sh",
     "tools/check_replies.sh",
     "tools/telegram_send.sh",
-    "tools/inbox_startup.py",
-    "tools/inbox_append.py",
-    "tools/inbox_read.py",
+    "tools/inbox.py",
     "tools/session_trigger_server.py",
     "tools/owner_brief.py",
 ]

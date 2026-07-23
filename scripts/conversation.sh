@@ -141,16 +141,23 @@ while true; do
         cp "$PROMPT_FILE" "$SESSION_PROMPT"
     fi
 
-    # Launch Claude Code in conversation mode
+    # Launch Claude Code in conversation mode.
+    # set +e around the launch: this is a restart loop, so a crashed/nonzero
+    # exit must not abort the whole script under `set -e`. The old `|| true`
+    # on this command discarded the real exit code entirely, and capturing
+    # $? after the `rm -f` that followed it made EXIT_CODE always read 0
+    # regardless of what actually happened -- every logged exit code below
+    # was meaningless.
+    set +e
     claude \
         --model "$MODEL" \
         --dangerously-skip-permissions \
         -p "$(cat "$SESSION_PROMPT")" \
-        > "$SESSION_OUT" 2> "$SESSION_ERR" || true
+        > "$SESSION_OUT" 2> "$SESSION_ERR"
+    EXIT_CODE=$?
+    set -e
 
     rm -f "$SESSION_PROMPT"
-
-    EXIT_CODE=$?
 
     # Read exit reason (written by agent before exiting)
     EXIT_REASON_FILE="$CONV_DIR/exit_reason.txt"

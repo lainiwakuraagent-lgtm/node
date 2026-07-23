@@ -24,8 +24,8 @@ sequenceDiagram
         TW->>TG: sendMessage (reply)
 
         alt task_request or idea
-            C->>IB: inbox_append.py (write pending.json)
-            Note over IB,W: Next execution session reads inbox_startup.py
-            W->>IB: inbox_startup.py → creates Loom task
+            C->>IB: inbox.py append (write pending.json)
+            Note over IB,W: Next execution session reads inbox.py startup
+            W->>IB: inbox.py startup → creates Loom task
         end
     end

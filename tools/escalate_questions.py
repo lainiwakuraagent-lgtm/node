@@ -106,7 +106,15 @@ def schedule_philosophy_session() -> None:
 
 
 def try_manual_trigger() -> None:
-    """Attempt to trigger philosophy session via the manual trigger endpoint."""
+    """Attempt to trigger philosophy session via the manual trigger endpoint.
+
+    session_trigger_server.py authenticates via the X-Trigger-Token header
+    (or a ?token= query param) -- it never reads the POST body. A token
+    embedded in a JSON body is silently ignored by the server and always
+    gets a 401; curl doesn't treat that as a failure without -f, so the
+    old version of this function logged "sent" on every attempt regardless
+    of whether the server actually accepted it.
+    """
     if not TRIGGER_TOKEN_FILE.exists():
         log("trigger_token.txt not found, skipping manual trigger")
         return
@@ -116,19 +124,21 @@ def try_manual_trigger() -> None:
         log("trigger token is empty, skipping manual trigger")
         return
 
-    payload = json.dumps({"token": token, "session_type": "philosophy"})
     try:
-        subprocess.run(
+        result = subprocess.run(
             [
-                "curl", "-s", "--max-time", "5",
+                "curl", "-s", "-f", "--max-time", "5",
                 "-X", "POST", "http://localhost:8766/trigger",
-                "-H", "Content-Type: application/json",
-                "-d", payload,
+                "-H", f"X-Trigger-Token: {token}",
             ],
             capture_output=True,
             timeout=10,
         )
-        log("manual trigger sent")
+        if result.returncode == 0:
+            log("manual trigger sent")
+        else:
+            log(f"manual trigger failed: curl exit {result.returncode} "
+                f"(stderr: {result.stderr.decode(errors='replace')[:200]})")
     except Exception as e:
         log(f"manual trigger failed (non-fatal): {e}")
 

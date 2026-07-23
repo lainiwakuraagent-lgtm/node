@@ -24,7 +24,23 @@ HASH_FILE = PROJECT_DIR / "state" / "blocker_digest_hash.txt"
 LAST_SENT_FILE = PROJECT_DIR / "state" / "blocker_digest_last_sent.txt"
 
 sys.path.insert(0, str(SCRIPT_DIR))
-from outbox_send import send_message
+from outbox import send_message
+
+
+def _load_agent_tag() -> str:
+    """Read AGENT_NAME from state/agent_config.env, default 'agent'."""
+    config_path = PROJECT_DIR / "state" / "agent_config.env"
+    name = "agent"
+    if config_path.exists():
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("AGENT_NAME="):
+                name = line.split("=", 1)[1].strip()
+                break
+    return "@" + name[:1].upper() + name[1:]
+
+
+AGENT_TAG = _load_agent_tag()
 
 
 def query_blockers(db_path: Path) -> list:
@@ -59,7 +75,7 @@ def build_digest(tasks: list) -> str:
     n = len(tasks)
     entries = "\n\n".join(format_entry(t) for t in tasks)
     return (
-        f"@Lain — Blocker Digest ({n} task{'s' if n != 1 else ''} awaiting your input)\n\n"
+        f"{AGENT_TAG} — Blocker Digest ({n} task{'s' if n != 1 else ''} awaiting your input)\n\n"
         f"{entries}\n\n"
         "Reply inline or in Telegram. Any decision moves the task forward."
     )

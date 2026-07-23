@@ -31,6 +31,22 @@ LOOM_PY = Path.home() / "lain" / "loom" / ".venv" / "bin" / "python"
 LOOM_DB = Path.home() / ".local" / "share" / "loom" / "loom.db"
 
 
+def _load_agent_tag() -> str:
+    """Read AGENT_NAME from state/agent_config.env, default 'agent'."""
+    config_path = PROJECT_DIR / "state" / "agent_config.env"
+    name = "agent"
+    if config_path.exists():
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("AGENT_NAME="):
+                name = line.split("=", 1)[1].strip()
+                break
+    return "@" + name[:1].upper() + name[1:]
+
+
+AGENT_TAG = _load_agent_tag()
+
+
 def get_loom_goals() -> list[dict]:
     """Query Loom DB for all goals."""
     try:
@@ -108,7 +124,7 @@ def status_icon(status: str) -> str:
 
 
 def generate_report() -> str:
-    now = datetime.now().strftime("%Y-%m-%d %H:%M CEST")
+    now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
     goals = get_loom_goals()
     task_counts = get_task_counts()
     milestones = extract_milestones_from_progress(PROJECT_DIR / "memory" / "progress.md")
@@ -116,7 +132,7 @@ def generate_report() -> str:
     total_sessions = sum(session_counts.values())
 
     lines = [
-        "# Milestone Report — @Lain",
+        f"# Milestone Report — {AGENT_TAG}",
         f"Generated: {now}",
         "",
         "---",

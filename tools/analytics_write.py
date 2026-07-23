@@ -159,14 +159,17 @@ def derive_session_key():
 
 
 def find_transcript():
-    """Return the path to the current session's JSONL transcript."""
-    # check_context.sh prints it; alternatively, glob for the newest file
+    """Return the path to the current session's JSONL transcript.
+
+    Claude Code's projects-dir slug is derived from the working directory path
+    and differs per clone/instance (e.g. agent_project vs blank_node), so it
+    can't be hardcoded. Matches check_session.sh --context's approach instead:
+    the most recently modified .jsonl file across all project directories.
+    """
     projects_dir = Path.home() / ".claude" / "projects"
-    slug = "-home-andrii-lain-agent-project"
-    target = projects_dir / slug
-    if not target.exists():
+    if not projects_dir.exists():
         return None
-    files = sorted(target.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(projects_dir.glob("*/*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     return files[0] if files else None
 
 
@@ -414,20 +417,14 @@ def import_csv(conn):
         reader = csv.DictReader(f)
         for row in reader:
             ts_raw = row.get("timestamp", "").strip()
-            # Normalize timestamp → ISO 8601
+            # Normalize timestamp → ISO 8601, preserving whatever timezone info
+            # is actually present (session_log.csv has a real mix: 'Z' suffix,
+            # '+HHMM' offsets, and naive local timestamps, all three in use
+            # across its history).
             try:
-                # Try various formats
-                for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S+%f",
-                            "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
-                    try:
-                        ts = datetime.strptime(ts_raw[:19], fmt[:len(fmt)])
-                        started_at = ts.isoformat()
-                        break
-                    except ValueError:
-                        continue
-                else:
-                    started_at = ts_raw
-            except Exception:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                started_at = ts.isoformat()
+            except ValueError:
                 started_at = ts_raw
 
             duration_raw = (row.get("duration_minutes") or "").strip()

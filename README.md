@@ -50,7 +50,17 @@ cp state/agent_config.env.example state/agent_config.env
 #   TELEGRAM_BOT_TOKEN=<your bot token>
 #   TELEGRAM_ALLOWED_USERS=<your chat id>
 
+# 5a. Configure outbox delivery routing (required for tools/outbox.py drain to
+# actually send anything -- without this, outbound messages queue forever
+# with no error, only a quiet line in logs/wake.log)
+cp state/delivery_routing.json.example state/delivery_routing.json
+# Set "chat_id" to the same value as TELEGRAM_ALLOWED_USERS above
+
 # 6. Install systemd timers
+# night-agent.service currently hardcodes WorkingDirectory and User=andrii --
+# edit those two fields to match your clone's path and system user before
+# copying (no install script yet to template this automatically -- see ROADMAP
+# Phase 1).
 cp scripts/night-agent.* ~/.config/systemd/user/
 systemctl --user enable --now night-agent.timer
 
@@ -96,12 +106,9 @@ node/
 │   ├── resolve_session_type.py      # Session type dispatcher
 │   └── splice_prompt.py             # Prompt construction utility
 ├── tools/
-│   ├── check_time.sh                # Time window + remaining minutes
-│   ├── check_context.sh             # Estimated context window usage
-│   ├── check_usage.sh               # Claude API usage limit check
+│   ├── check_session.sh             # Unified: --time / --context / --usage checks
 │   ├── check_replies.sh             # Read incoming messages (reply.txt + Telegram)
-│   ├── enable_emergency_mode.sh     # Activate emergency timer
-│   ├── disable_emergency_mode.sh    # Deactivate emergency timer
+│   ├── emergency_mode.sh            # Toggle emergency timer (on|off)
 │   ├── session_trigger_server.py    # HTTP server for manual triggers
 │   ├── telegram_send.sh             # Send Telegram message to owner
 │   ├── telegram_check.sh            # Check Telegram for new messages
@@ -114,7 +121,8 @@ node/
 │   ├── session_digest.py            # Summarize sessions across a date range
 │   ├── analytics_write.py           # Write session analytics to analytics.db
 │   ├── session_report.py            # Generate session reports for /report command
-│   ├── outbox_send.py               # Queue async messages to owner
+│   ├── inbox.py                     # Inbox tool (startup|read|append|prune)
+│   ├── outbox.py                    # Outbox tool (send|drain|check)
 │   ├── wonder_module.py             # Philosophy session exploration tool
 │   └── ...                          # More in tools/
 ├── prompts/

@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/home/andrii/lain/agent_project}"
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 LOCK_FILE="$PROJECT_DIR/state/conversation.lock"
 BUDGET_FILE="$PROJECT_DIR/state/conversation/context_budget.json"
 WATCHER_PID_FILE="$PROJECT_DIR/state/conversation/watcher.pid"

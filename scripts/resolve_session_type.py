@@ -42,11 +42,12 @@ Output JSON:
 """
 
 import argparse
+import csv
 import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 LOOM_DB_PATH = Path.home() / ".local" / "share" / "loom" / "loom.db"
@@ -218,7 +219,7 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
         return "maintenance", "window_type", ""
     if window_type == "reflection":
         # Reflection windows can also pick philosophy
-        reflection_type = _pick_reflection_type(db_path)
+        reflection_type = _pick_reflection_type(project_dir)
         return reflection_type, "window_type", ""
     # window_type == "work" or unset: fall through to queue-state logic
 
@@ -228,9 +229,9 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
         return queue_type, "queue_state", queue_reason
 
     # Priority 3b: Inbox has unprocessed task_requests/bug_reports/task_comments → execution needed
-    # This handles the case where inbox_startup.py hasn't run yet (it runs inside the
+    # This handles the case where inbox.py startup hasn't run yet (it runs inside the
     # session, after session type is resolved). If inbox has actionable work, force
-    # execution so inbox_startup can convert entries to Loom tasks and work them.
+    # execution so inbox.py startup can convert entries to Loom tasks and work them.
     if _inbox_has_pending_tasks(project_dir):
         return "execution", "inbox_pending", \
             "inbox/pending.json has unprocessed task_request/bug_report/task_comment entries"
@@ -281,27 +282,38 @@ def _inbox_has_pending_tasks(project_dir: Path) -> bool:
         return False
 
 
-def _pick_reflection_type(db_path: Path) -> str:
+def _pick_reflection_type(project_dir: Path) -> str:
     """
     For reflection windows, decide between 'reflection' and 'philosophy'.
     Uses a simple heuristic: if there is a recent philosophy session (last 3 days),
-    return 'reflection'; otherwise alternate by checking session count parity.
+    return 'reflection'; otherwise pick philosophy this time.
     Falls back to 'reflection' on any error.
+
+    Reads logs/session_log.csv rather than the Loom DB's loom_sessions.type column.
+    That column holds the trigger mode (nightly/emergency/manual), not the session
+    type — the same mismatch T251 fixed for the philosophy_gap trigger. Querying
+    it for type='philosophy' here would always return zero rows, making this
+    heuristic always resolve to 'philosophy' and never 'reflection'.
     """
-    if not db_path.exists():
+    session_log = project_dir / "logs" / "session_log.csv"
+    if not session_log.exists():
         return "reflection"
 
     try:
-        conn = sqlite3.connect(str(db_path))
-        # Check if loom_sessions table exists and has a recent philosophy session
-        rows = conn.execute(
-            "SELECT COUNT(*) FROM loom_sessions "
-            "WHERE type = 'philosophy' "
-            "AND date >= date('now', '-3 days')"
-        ).fetchone()
-        conn.close()
-        if rows and rows[0] > 0:
-            return "reflection"
+        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+        with open(session_log, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("session_type") != "philosophy":
+                    continue
+                ts_raw = row.get("timestamp", "")
+                try:
+                    ts = datetime.fromisoformat(ts_raw)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    if ts > cutoff:
+                        return "reflection"
+                except ValueError:
+                    continue
         # No recent philosophy — pick philosophy this time
         return "philosophy"
     except Exception:

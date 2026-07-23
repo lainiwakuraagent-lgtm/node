@@ -3,7 +3,7 @@
 daily_digest.py — Goal 9, Task 66
 
 Generates state/reports/daily_digest.md: a digest of all sessions from today,
-giving a human-readable overview of what @Lain accomplished in the last 24h.
+giving a human-readable overview of what the agent accomplished in the last 24h.
 
 Usage:
   python3 tools/daily_digest.py [--date YYYY-MM-DD] [--output PATH] [--send]
@@ -26,6 +26,22 @@ from datetime import datetime, date
 from pathlib import Path
 
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path(__file__).parent.parent))
+
+
+def _load_agent_tag() -> str:
+    """Read AGENT_NAME from state/agent_config.env, default 'agent'."""
+    config_path = PROJECT_DIR / "state" / "agent_config.env"
+    name = "agent"
+    if config_path.exists():
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("AGENT_NAME="):
+                name = line.split("=", 1)[1].strip()
+                break
+    return "@" + name[:1].upper() + name[1:]
+
+
+AGENT_TAG = _load_agent_tag()
 
 
 def read_today_csv_rows(csv_path: Path, target_date: str) -> list[dict]:
@@ -102,13 +118,13 @@ def generate_digest(target_date: str | None = None) -> str:
     rows = read_today_csv_rows(csv_path, target_date)
     session_files = find_today_session_files(sessions_dir, target_date)
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M CEST")
+    now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
     total_sessions = len(rows)
     total_minutes = sum(int(r["duration"]) for r in rows if r["duration"].isdigit())
     stats = type_stats(rows)
 
     lines = [
-        f"# Daily Digest — @Lain",
+        f"# Daily Digest — {AGENT_TAG}",
         f"Date: {target_date}  |  Generated: {now}",
         "",
         "---",

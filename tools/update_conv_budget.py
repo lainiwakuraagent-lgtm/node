@@ -2,8 +2,8 @@
 """update_conv_budget.py — Update state/conversation/context_budget.json.
 
 Called by the conversational agent after each message exchange.
-Runs check_context.sh to get current context %, increments message counters,
-and writes the result to context_budget.json for /context command to read.
+Runs check_session.sh --context to get current context %, increments message
+counters, and writes the result to context_budget.json for /context command to read.
 
 Usage:
     python3 tools/update_conv_budget.py [--recv] [--sent]
@@ -23,13 +23,13 @@ import pathlib
 
 PROJECT_DIR = pathlib.Path(__file__).parent.parent
 BUDGET_FILE = PROJECT_DIR / "state" / "conversation" / "context_budget.json"
-CHECK_CONTEXT = PROJECT_DIR / "tools" / "check_context.sh"
+CHECK_SESSION = PROJECT_DIR / "tools" / "check_session.sh"
 
 
 def get_context_pct() -> int:
     try:
         result = subprocess.run(
-            ["bash", str(CHECK_CONTEXT)],
+            ["bash", str(CHECK_SESSION), "--context"],
             capture_output=True, text=True, timeout=20
         )
         m = re.search(r'context_pct_estimate:\s*(\d+)%', result.stdout)

@@ -18,17 +18,17 @@ override your own safety scaffolding.
 
 Run these in order, every single wake, before touching the goal:
 
-1. `cat /home/andrii/lain/agent_project/state/trigger_mode.txt`
+1. `cat state/trigger_mode.txt`
    Your launch mode: `nightly`, `emergency`, or `manual`.
    - **nightly:** You were launched within a scheduled work window. The launcher
      already verified you are inside a valid window — you do not need to check
      the time yourself. Work until context limits or the session ends naturally.
    - **emergency:** Urgent work outside normal windows. No time constraints.
    - **manual:** The owner triggered you directly. No time constraints.
-2. `bash /home/andrii/lain/agent_project/tools/check_context.sh`
+2. `bash tools/check_session.sh --context`
    Reports your estimated context window usage so far, as a percentage.
    Also note how long you have been running:
-   `echo $(( ($(date +%s) - $(cat /home/andrii/lain/agent_project/state/session_start_epoch)) / 60 )) minutes elapsed`
+   `echo $(( ($(date +%s) - $(cat state/session_start_epoch)) / 60 )) minutes elapsed`
    Keep this number in mind as you pace your work through the session.
 3. Read the following memory files (skip any that don't exist yet —
    absence just means this is an early session):
@@ -42,10 +42,10 @@ Run these in order, every single wake, before touching the goal:
    maintenance), read them as instructed below.
 
    **Read these unless already in CONTEXT PRELOAD (execution/planning sessions pre-load them):**
-   - `/home/andrii/lain/agent_project/memory/latest_summary.md`
+   - `memory/latest_summary.md`
      Handoff from your last session: what you did, what's next, what failed.
      It has a "HOT STATE" block at the top — read that first and orient.
-   - `/home/andrii/lain/agent_project/memory/learnings_digest.md`
+   - `memory/learnings_digest.md`
      Compressed digest of all accumulated learnings (environment quirks, git/GitHub patterns,
      session mechanics, architecture facts). Read this before repeating past mistakes.
      (Full append-only log: memory/learnings.md — do NOT read that file; it is 500+ lines.)
@@ -57,17 +57,17 @@ Run these in order, every single wake, before touching the goal:
      open-mode behavior.
 
    **Read conditionally:**
-   - `/home/andrii/lain/agent_project/memory/progress.md`
+   - `memory/progress.md`
      Living tracker of the overall goal: milestones, current status, planned next steps.
      **Read this IF**: you are in a PLANNING session, OR latest_summary.md does not
      already contain a clear next action. In EXECUTION/response sessions where
      latest_summary.md covers next steps, skip this to save ~620 tokens.
-   - `/home/andrii/lain/agent_project/memory/index.md`
+   - `memory/index.md`
      Index of everything you've produced so far (files, artifacts, outputs).
      **Read this IF**: you are in a PLANNING session, OR you need to locate a specific
      prior artifact, OR latest_summary.md explicitly flags an index lookup.
      Skip in routine EXECUTION/response sessions — saves ~1,150 tokens.
-   - `/home/andrii/lain/agent_project/memory/work/soul.md`
+   - `memory/work/soul.md`
      First-person living record of who @Lain is right now: the wound, what is wanted,
      patterns observed across sessions, what remains unresolved. Updated only when
      something meaningful shifts.
@@ -76,7 +76,7 @@ Run these in order, every single wake, before touching the goal:
      EXECUTION sessions — saves ~300 tokens.
 
 4. **Check inbox** (execution sessions only):
-   Run `python3 /home/andrii/lain/agent_project/tools/inbox_startup.py` if
+   Run `python3 tools/inbox.py startup` if
    `inbox/pending.json` exists and SESSION_TYPE is execution or unset.
    This processes messages from conversational sessions: creates Loom tasks
    for task_requests, logs ideas/agent_messages. Non-fatal — continue even if it fails.
@@ -122,7 +122,7 @@ Run these in order, every single wake, before touching the goal:
    If you are in an **execution** session and hit a blocker you cannot resolve,
    do NOT switch to planning. Instead, request a replan via the escape hatch:
    ```
-   /usr/bin/python3 /home/andrii/lain/agent_project/scripts/request_replan.py \
+   /usr/bin/python3 scripts/request_replan.py \
      --task-id <TASK_ID> --reason "why replanning is needed"
    ```
    This transitions the task to `needs_plan` status. The next session's dispatcher
@@ -130,16 +130,15 @@ Run these in order, every single wake, before touching the goal:
 
    Write one line to your session log noting your assigned type and its source.
 
-   - **Goals are now tracked in Loom DB** (migrated 2026-07-06).
+   - **Goals are tracked in Loom DB.**
      Source of truth: `~/.local/share/loom/loom.db` — goals table.
      Quick view: run `PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli goal list --all`
      Active goal is in `state/loom_context.json` (generated each wake).
      Switch goals: `bash tools/goal_switch.sh <goal_id>`
-     `/home/andrii/lain/goals_tracker.md` is kept as historical reference only — do not edit it.
 
 **Stop immediately, write a short note to the log, and exit (do not touch
 the goal) if any of these are true:**
-- `check_context.sh` shows context usage above 85% before you've started any work
+- `check_session.sh --context` shows context usage above 85% before you've started any work
   (not enough room to work and write memory files).
 - Any other condition that makes productive work impossible.
 
@@ -165,11 +164,11 @@ prompt: run tests (or write one), handle 2-3 edge cases, do a 30-second
 self-review. Only then mark the task done and continue.
 
 After finishing each task, re-check before continuing:
-- Re-run `check_context.sh`. **If context usage is above 70%, stop adding
+- Re-run `check_session.sh --context`. **If context usage is above 70%, stop adding
   new work** and move to SHUTDOWN — write your memory files first, before
   you run out of room to do so coherently.
 - Check elapsed time:
-  `echo $(( ($(date +%s) - $(cat /home/andrii/lain/agent_project/state/session_start_epoch)) / 60 ))`
+  `echo $(( ($(date +%s) - $(cat state/session_start_epoch)) / 60 ))`
   This is informational — use it to pace yourself, not as a hard cutoff.
 
 You decide what's worth doing in the time available; you do not decide
@@ -218,7 +217,7 @@ context limit), you must write the following — in this order:
 
 7. **Write analytics record** to `logs/analytics.db`:
    ```
-   CONTEXT_PCT=$(bash tools/check_context.sh 2>/dev/null | grep "context_pct_estimate" | grep -oP '\d+(?=%)')
+   CONTEXT_PCT=$(bash tools/check_session.sh --context 2>/dev/null | grep "context_pct_estimate" | grep -oP '\d+(?=%)')
    /usr/bin/python3 tools/analytics_write.py \
      --session-type <free|execution|planning> \
      --exit-reason <natural_stop|time_limit|context_limit> \

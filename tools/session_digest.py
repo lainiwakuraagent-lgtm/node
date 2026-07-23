@@ -30,6 +30,22 @@ SESSIONS_DIR = PROJECT_DIR / "memory" / "sessions"
 SEND_SCRIPT = PROJECT_DIR / "tools" / "telegram_send.sh"
 
 
+def _load_agent_tag() -> str:
+    """Read AGENT_NAME from state/agent_config.env, default 'agent'."""
+    config_path = PROJECT_DIR / "state" / "agent_config.env"
+    name = "agent"
+    if config_path.exists():
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("AGENT_NAME="):
+                name = line.split("=", 1)[1].strip()
+                break
+    return "@" + name[:1].upper() + name[1:]
+
+
+AGENT_TAG = _load_agent_tag()
+
+
 def parse_session_file(path: Path) -> dict:
     """Extract key fields from a session log file."""
     try:
@@ -121,7 +137,7 @@ def format_session(s: dict) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compact digest of recent @Lain session logs"
+        description="Compact digest of recent agent session logs"
     )
     parser.add_argument(
         "--last", type=int, default=7,
@@ -163,7 +179,7 @@ def main():
 
     sessions = [parse_session_file(f) for f in files]
 
-    header = f"@Lain — Session Digest ({len(sessions)} sessions)"
+    header = f"{AGENT_TAG} — Session Digest ({len(sessions)} sessions)"
     separator = "─" * len(header)
     blocks = [header, separator, ""]
 

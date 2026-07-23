@@ -68,19 +68,35 @@ Then start the message-wait loop below.
 3. **On any wakeup** (timeout or message): quick Nexus check first:
    `bash tools/check_nexus.sh` — non-blocking, fast.
    If new agent messages found: for each one, call:
-   `python3 tools/inbox_append.py --type agent_message --from <sender> --source nexus --content "..."`
+   `python3 tools/inbox.py append --type agent_message --from <sender> --source nexus --content "..."`
    Then optionally respond via Nexus if the message warrants it.
 4. On timeout (no Telegram message for 10 min): restart watcher, continue loop
 5. On exit_code=0: parse JSON from stdout → Telegram message received
 6. Read the message. Think. Respond.
+6a. **Track answered questions** — if the message you just received answers a question
+    you previously sent (check `state/conversation/open_questions.json` for `status: open`
+    entries), mark that entry's status as `answered`. Update the file.
 7. Send response via `printf '%s' "response" | bash tools/telegram_send.sh`
 8. Update `state/conversation/thread.json` (append both turns)
 9. Update context budget (run after every exchange):
    `python3 tools/update_conv_budget.py`
-   This reads check_context.sh, increments message counters, and writes
+   This reads check_session.sh --context, increments message counters, and writes
    state/conversation/context_budget.json so /context command stays accurate.
-10. If context >= 70%: write checkpoint, exit 0 (conversation.sh will restart)
-11. Else: loop from step 1
+10. **Check for signals** — on EVERY wakeup (message received OR timeout), check:
+    - Read `state/conversation/reset_signal.txt` if it exists
+    - If `action` is `idle_close`:
+      0. Run `python3 tools/escalate_questions.py` (escalates open questions + schedules philosophy session)
+      1. Write `state/conversation/checkpoint.json` (same format as context-full exit: brief 3-5 line summary)
+      2. Delete `reset_signal.txt` (consume the signal)
+      3. Write `idle_close` to `state/conversation/exit_reason.txt`
+      4. Exit 0
+    - If `action` is `reset` or `new`:
+      1. Write checkpoint.json
+      2. Delete reset_signal.txt
+      3. Write `reset` or `new` to `state/conversation/exit_reason.txt`
+      4. Exit 0
+11. If context >= 70%: write checkpoint, write `context_full` to `state/conversation/exit_reason.txt`, exit 0 (conversation.sh will restart)
+12. Else: loop from step 1
 
 ---
 
@@ -115,7 +131,7 @@ When a message starts with `/`, handle it as a command before treating it as con
 - Do NOT apologize or over-explain. Just confirm and exit.
 
 **`/context`**
-- Run: `bash tools/check_context.sh`
+- Run: `bash tools/check_session.sh --context`
 - Parse the `context_pct_estimate` line
 - Reply with the percentage and a one-line status: "ok to continue" (<50%) or "getting heavy" (50-70%) or "should reset soon" (>70%)
 - Example: "⚙ context at 12% — ok to continue. (҂◡_◡)"

@@ -48,6 +48,7 @@ TIER_1_PATTERNS = [
     (r'exit_code=[1-9]\d*\b', 'failure'),
     (r'\bFAILED\b.*tests|\btests.*\bFAILED\b', 'tests_failed'),
     (r'PAT.*401|token.*401|github.*401|token.*expired', 'auth_failure'),
+    (r'ABORT: subscription usage too high|usage limit exceeded', 'usage_limit_hit'),
 
     # Milestones — specific check mark or explicit complete label
     (r'COMPLETE ✓|ALL PHASES.*DONE|all.*phases.*complete', 'milestone_complete'),
@@ -86,7 +87,6 @@ TIER_2_PATTERNS = [
 
 IGNORE_PATTERNS = [
     # Routine orientation
-    r'check_time\.sh|check_context\.sh|check_replies\.sh',
     r'Reading.*memory|Loading.*memory|cat.*\.md',
     r'minutes remaining|context_pct',
     r'sessions_tonight|session_start_epoch',
@@ -96,7 +96,6 @@ IGNORE_PATTERNS = [
     r'LOOM context snapshot written',
     r'Goal marked complete\. Using default_goal\.txt',
     r'using.*goal\.txt|goal\.txt.*for this session',
-    r'check_usage\.sh',
     r'pre-incrementing session counter',
     r'wake\.sh.*starting|starting.*wake\.sh',
     r'Checking session count|session count.*ok',

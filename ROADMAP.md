@@ -30,12 +30,21 @@ Cleanup and documentation sprint before the repo goes public.
 - [x] Update and extend architecture diagrams (`.claude/architecture/`)
 - [ ] Audit `check_character.sh` and `consolidate_session.sh`
 - [ ] TTS tools decision (remove `tts_send.sh` / `fish_tts_send.sh`)
-- [ ] Consolidate fragmented tools into unified interfaces:
+- [x] Consolidate fragmented tools into unified interfaces:
   - `inbox_startup.py` + `inbox_read.py` + `inbox_append.py` → `inbox.py`
   - `enable_emergency_mode.sh` + `disable_emergency_mode.sh` → `emergency_mode.sh on|off`
   - `outbox_drain.py` + `outbox_send.py` → `outbox.py send|drain`
   - `check_usage.sh` + `check_context.sh` + `check_time.sh` → `check_session.sh --usage|--context|--time`
-- [ ] Flatten architecture where possible — reduce unnecessary abstraction layers
+- [x] Audit `check_character.sh` and `consolidate_session.sh` — reviewed, both clean (relative paths, no hardcoded state, no bugs found)
+- [x] TTS tools decision — keep `tts_send.sh` / `fish_tts_send.sh` as-is
+- [ ] Flatten architecture where possible — reduce unnecessary abstraction layers (deferred — needs a scoped follow-up conversation)
+
+**Note on `scan_file_inbox.py`:** audited during Phase 0 cleanup — scans `~/lain/file_inbox/` for
+dropped files, but was never wired into any session prompt and has never run once (no seen-state
+file, zero log entries in `maintenance_decisions.md`). Left as-is intentionally: this is the seed
+of a planned future "file dropbox" feature, not dead code. Also has a real bug (ignores its own
+`--project-dir` flag, hardcodes `/home/andrii/lain/agent_project` paths) — fix when the feature
+is actually built out.
 
 ---
 
@@ -66,6 +75,13 @@ A single `install.sh` that:
   file-watch triggers) and the mitigations in place. This is the primary security risk for
   an agent that processes external input.
 - Define credential rotation procedures
+- **web_server.py has zero authentication on any endpoint** (flagged 2026-07-23) while
+  defaulting to `--host 0.0.0.0`. `POST /api/trigger/manual`, `/api/emergency/enable`,
+  `PUT /api/nightly-schedule`, and `PUT /api/session-types/{id}` can launch sessions and
+  rewrite config with no auth check at all — a larger blast radius than
+  session_trigger_server.py (port 8766), which *does* require an `X-Trigger-Token` header
+  for the equivalent exposure. Needs either token auth matching that pattern, or defaulting
+  the bind host to 127.0.0.1, before this is safe to run reachable beyond localhost.
 
 ### Session type extensibility
 - Document the YAML config + prompt system as a first-class extension point
@@ -209,3 +225,5 @@ migration notes with each significant version change.
 | Loom refactor | Which task types are actually needed across diverse agent types? | Open |
 | Frontend | Backend data contracts before UI work begins | Dependency |
 | Prompt injection | Are current mitigations sufficient for a public deployment? | Needs audit |
+| check_replies.sh | Never invoked by any prompt/script in blank_node or agent_project, despite its own docstring saying "run at start of every session" and being described as the webhook-reply reader everywhere else. Webhook-delivered replies during nightly/execution sessions are never processed. Needs wiring into wrapper_prompt.md (or a deliberate decision that it's superseded). | Flagged 2026-07-23, deferred |
+| conv_idle_check.py | Depends on `state/conversation/last_real_message_at.txt`, which nothing in either repo ever writes — the 30-min idle-close auto-shutdown has never fired. conv_watchdog.py's separate staleness/crash detection is the only thing currently guarding the conversational layer. Needs a step added to conversation.md's message loop to write the timestamp, in both repos. | Flagged 2026-07-23, deferred |

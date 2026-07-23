@@ -29,6 +29,22 @@ from pathlib import Path
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path(__file__).parent.parent))
 
 
+def _load_agent_tag() -> str:
+    """Read AGENT_NAME from state/agent_config.env, default 'agent'."""
+    config_path = PROJECT_DIR / "state" / "agent_config.env"
+    name = "agent"
+    if config_path.exists():
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("AGENT_NAME="):
+                name = line.split("=", 1)[1].strip()
+                break
+    return "@" + name[:1].upper() + name[1:]
+
+
+AGENT_TAG = _load_agent_tag()
+
+
 def _extract_section(text: str, header: str) -> str:
     """Extract content from a ## section header.
 
@@ -166,7 +182,7 @@ def generate_report(n_sessions: int = 3) -> str:
     csv_path = PROJECT_DIR / "logs" / "session_log.csv"
     sessions_dir = PROJECT_DIR / "memory" / "sessions"
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M CEST")
+    now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
     hot_state = read_hot_state(summary_path)
     blockers = read_blockers(summary_path)
     next_action = read_next_action(summary_path)
@@ -174,7 +190,7 @@ def generate_report(n_sessions: int = 3) -> str:
     session_files = find_session_files(sessions_dir, n_sessions)
 
     lines = [
-        f"# Session Report — @Lain",
+        f"# Session Report — {AGENT_TAG}",
         f"Generated: {now}",
         "",
         "---",

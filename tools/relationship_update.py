@@ -35,10 +35,30 @@ import os
 import re
 import json
 import argparse
+import urllib.error
+import urllib.request
 from pathlib import Path
 from datetime import datetime, date
 
 PROJECT_DIR = Path(__file__).parent.parent
+
+
+def _load_agent_config() -> tuple[str, str]:
+    """Read AGENT_NAME/OWNER_NAME from state/agent_config.env, defaults 'agent'/'owner'."""
+    config_path = PROJECT_DIR / "state" / "agent_config.env"
+    name, owner = "agent", "owner"
+    if config_path.exists():
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("AGENT_NAME="):
+                name = line.split("=", 1)[1].strip()
+            elif line.startswith("OWNER_NAME="):
+                owner = line.split("=", 1)[1].strip()
+    return name, owner
+
+
+_AGENT_NAME, _OWNER_NAME = _load_agent_config()
+AGENT_TAG = "@" + _AGENT_NAME[:1].upper() + _AGENT_NAME[1:]
 
 
 # Decay rates per day (exponential: value *= rate^days_since_last_session)
@@ -124,10 +144,10 @@ def clamp(value: float, axis: str) -> float:
 
 # --- Classification: LLM mode ---
 
-LLM_PROMPT_TEMPLATE = """\
+LLM_PROMPT_TEMPLATE = f"""\
 You are analyzing a night agent session log for relationship-relevant events between \
-the AI agent (@Lain) and the human owner (Andrii).
-
+the AI agent ({AGENT_TAG}) and the human owner ({_OWNER_NAME.capitalize()}).
+""" + """
 Current relationship state (post-decay):
   Trust:    {trust:.2f}  — reliability, predictability, honesty
   Warmth:   {warmth:.2f}  — positive regard, affection, connection
@@ -416,3 +436,4 @@ def main():
 
 
 if __name__ == '__main__':
+    main()

@@ -29,7 +29,7 @@ Endpoints:
   POST /api/emergency/enable   → enable emergency mode
   POST /api/emergency/disable  → disable emergency mode
   POST /api/health/run         → run health_check.sh and return result
-  POST /api/usage/check        → run check_usage.sh and return result
+  POST /api/usage/check        → run check_session.sh --usage and return result
   GET  /api/session-types      → list session type definitions (config/session_types/*.yaml)
   PUT  /api/session-types/{id} → save a session type YAML
   GET  /api/nightly-schedule   → read real nightly schedule (config/session_schedule.json)
@@ -192,8 +192,8 @@ def detect_capabilities() -> dict:
         "character": (MEMORY_DIR / "work" / "soul.md").exists(),
         "relationship": False,
         "health_check": (TOOLS_DIR / "health_check.sh").exists(),
-        "usage_check": (TOOLS_DIR / "check_usage.sh").exists(),
-        "emergency_mode": (TOOLS_DIR / "enable_emergency_mode.sh").exists(),
+        "usage_check": (TOOLS_DIR / "check_session.sh").exists(),
+        "emergency_mode": (TOOLS_DIR / "emergency_mode.sh").exists(),
         "manual_trigger": (TOOLS_DIR / "session_trigger_server.py").exists(),
         "wake_sh": (SCRIPTS_DIR / "wake.sh").exists(),
     }
@@ -774,7 +774,7 @@ def _get_nightly_schedule() -> dict:
             return json.loads(NIGHTLY_SCHEDULE_FILE.read_text())
         except Exception:
             pass
-    return {"version": 1, "recurring": [], "one_off": []}
+    return {"version": 2, "windows": [], "one_off": []}
 
 
 def _save_nightly_schedule(data: dict) -> dict:
@@ -811,18 +811,18 @@ def _trigger_manual(session_type: str = "") -> dict:
 
 
 def _emergency_enable() -> dict:
-    script = TOOLS_DIR / "enable_emergency_mode.sh"
+    script = TOOLS_DIR / "emergency_mode.sh"
     if not script.exists():
-        raise HTTPException(status_code=500, detail="enable_emergency_mode.sh not found")
-    result = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=10)
+        raise HTTPException(status_code=500, detail="emergency_mode.sh not found")
+    result = subprocess.run(["bash", str(script), "on"], capture_output=True, text=True, timeout=10)
     return {"ok": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr}
 
 
 def _emergency_disable() -> dict:
-    script = TOOLS_DIR / "disable_emergency_mode.sh"
+    script = TOOLS_DIR / "emergency_mode.sh"
     if not script.exists():
-        raise HTTPException(status_code=500, detail="disable_emergency_mode.sh not found")
-    result = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=10)
+        raise HTTPException(status_code=500, detail="emergency_mode.sh not found")
+    result = subprocess.run(["bash", str(script), "off"], capture_output=True, text=True, timeout=10)
     return {"ok": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr}
 
 
@@ -849,11 +849,11 @@ def _run_health_check() -> dict:
 
 
 def _check_usage() -> dict:
-    script = TOOLS_DIR / "check_usage.sh"
+    script = TOOLS_DIR / "check_session.sh"
     if not script.exists():
-        raise HTTPException(status_code=500, detail="check_usage.sh not found")
+        raise HTTPException(status_code=500, detail="check_session.sh not found")
     result = subprocess.run(
-        ["bash", str(script)],
+        ["bash", str(script), "--usage"],
         capture_output=True, text=True, timeout=20,
         cwd=str(PROJECT_DIR),
     )

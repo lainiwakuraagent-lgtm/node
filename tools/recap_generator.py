@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-recap_generator.py — Generate catch-up recap for @Lain conversational sessions.
+recap_generator.py — Generate catch-up recap for the agent's conversational sessions.
 
 When a conversational session starts after a meaningful gap, this script assembles
 structured facts (Loom task events, Nexus messages, sessions ran, reports) and
@@ -30,6 +30,24 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 LOOM_DB = Path.home() / ".local" / "share" / "loom" / "loom.db"
 
+
+def _load_agent_config() -> tuple[str, str]:
+    """Read AGENT_NAME/OWNER_NAME from state/agent_config.env, defaults 'agent'/'owner'."""
+    config_path = PROJECT_DIR / "state" / "agent_config.env"
+    name, owner = "agent", "owner"
+    if config_path.exists():
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("AGENT_NAME="):
+                name = line.split("=", 1)[1].strip()
+            elif line.startswith("OWNER_NAME="):
+                owner = line.split("=", 1)[1].strip()
+    return name, owner
+
+
+_AGENT_NAME, _OWNER_NAME = _load_agent_config()
+AGENT_TAG = "@" + _AGENT_NAME[:1].upper() + _AGENT_NAME[1:]
+
 STATE_DIR = PROJECT_DIR / "state"
 CONV_STATE_DIR = STATE_DIR / "conversation"
 REPORTS_DIR = STATE_DIR / "reports"
@@ -49,11 +67,11 @@ MAX_GAP = 172800  # 48 hours
 LLM_MODEL = "claude-haiku-4-5-20251001"
 
 SYSTEM_PROMPT = (
-    "You are @Lain, an autonomous AI agent. Write a brief recap of what happened "
-    "during a gap when the owner (Andrii) was away. The recap must be standalone-readable "
-    "-- the reader has NO other context. Be concise (3-8 sentences). Include: what sessions "
-    "ran, what tasks progressed, any notable events. If nothing happened, say so directly. "
-    "Do not pad. Use a casual but precise tone."
+    f"You are {AGENT_TAG}, an autonomous AI agent. Write a brief recap of what happened "
+    f"during a gap when the owner ({_OWNER_NAME.capitalize()}) was away. The recap must be "
+    "standalone-readable -- the reader has NO other context. Be concise (3-8 sentences). "
+    "Include: what sessions ran, what tasks progressed, any notable events. If nothing "
+    "happened, say so directly. Do not pad. Use a casual but precise tone."
 )
 
 

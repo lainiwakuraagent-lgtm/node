@@ -11,6 +11,8 @@ state/behavioral_context.txt
 state/session_start_epoch
 state/session_model.txt
 state/emergency_mode.active
+state/agent_config.env
+state/delivery_routing.json
 
 # Logs — keep structure, skip content
 logs/*.log

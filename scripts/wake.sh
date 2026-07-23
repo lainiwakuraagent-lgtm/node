@@ -11,6 +11,7 @@
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "$PROJECT_DIR"
 STATE_DIR="$PROJECT_DIR/state"
 LOG_DIR="$PROJECT_DIR/logs"
 WRAPPER_TEMPLATE="$PROJECT_DIR/prompts/wrapper_prompt.md"
@@ -91,16 +92,16 @@ current_count=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
 
 # --- Gate 0: subscription usage limits (all modes) ---
 # Fail-open on errors so network/auth issues never silently kill the launch.
-usage_check_output=$(bash "$PROJECT_DIR/tools/check_usage.sh" 2>&1) \
+usage_check_output=$(bash "$PROJECT_DIR/tools/check_session.sh" --usage 2>&1) \
   || usage_check_output="ACTION: cannot check usage -- treat as unknown, proceed with caution."
 usage_action=$(echo "$usage_check_output" | grep '^ACTION:' | head -n1)
 
 if echo "$usage_action" | grep -q 'usage limit exceeded'; then
-  log_line "ABORT: subscription usage too high. check_usage.sh output: $usage_check_output"
+  log_line "ABORT: subscription usage too high. check_session.sh --usage output: $usage_check_output"
   exit 0
 fi
 if echo "$usage_action" | grep -q 'cannot check usage'; then
-  log_line "WARNING: could not check usage limits (proceeding). check_usage.sh output: $usage_check_output"
+  log_line "WARNING: could not check usage limits (proceeding). check_session.sh --usage output: $usage_check_output"
 fi
 
 # --- Gate 1 (nightly only): block if emergency mode is active ---
@@ -115,170 +116,23 @@ fi
 
 # --- Gate 2 (nightly only): window + trigger check from session_schedule.json ---
 # Emergency and manual modes bypass window checks entirely.
+# Logic lives in scripts/check_window.py. `check` is read-only — a matching
+# one_off entry is detected but NOT marked fired here. It's only marked fired
+# after Gate 4 (lock check) passes, below, so a one_off session can never be
+# silently consumed without actually launching.
+ONE_OFF_INDEX=""
 if [ "$TRIGGER_MODE" = "nightly" ]; then
   SCHEDULE_FILE="$PROJECT_DIR/config/session_schedule.json"
   LOCK_FILE_PRE="$STATE_DIR/session.lock"
 
-  window_result=$(python3 -c "
-import json, sys, os
-from datetime import datetime
-
-schedule_file = sys.argv[1]
-lock_file = sys.argv[2]
-
-try:
-    with open(schedule_file) as f:
-        schedule = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError) as e:
-    print('ERROR: cannot read schedule: ' + str(e), file=sys.stderr)
-    print('LAUNCH: yes')
-    print('WINDOW_TYPE: work')
-    print('decision=launch reason=schedule_unreadable')
-    sys.exit(0)
-
-now = datetime.now()
-now_minutes = now.hour * 60 + now.minute
-now_seconds = now.hour * 3600 + now.minute * 60 + now.second
-
-TRIGGER_TOLERANCE_SEC = 45
-
-def time_to_minutes(t):
-    h, m = map(int, t.split(':'))
-    return h * 60 + m
-
-def time_to_seconds(t):
-    h, m = map(int, t.split(':'))
-    return h * 3600 + m * 60
-
-def in_window(start_str, end_str, now_min):
-    start = time_to_minutes(start_str)
-    end = time_to_minutes(end_str)
-    if start <= end:
-        return start <= now_min < end
-    else:
-        # wraps midnight (e.g., 23:00-05:00)
-        return now_min >= start or now_min < end
-
-# --- Validate: windows must not overlap ---
-enabled_windows = [w for w in schedule.get('windows', []) if w.get('enabled', True)]
-
-def windows_overlap(a, b):
-    \"\"\"Check if two windows overlap. Handles midnight wrapping.\"\"\"
-    a_start = time_to_minutes(a['start'])
-    a_end = time_to_minutes(a['end'])
-    b_start = time_to_minutes(b['start'])
-    b_end = time_to_minutes(b['end'])
-
-    # Normalize to ranges on a 0-2880 timeline (two days) to handle midnight wrap
-    def expand(s, e):
-        if s <= e:
-            return [(s, e)]
-        else:
-            return [(s, 1440), (0, e)]
-
-    a_ranges = expand(a_start, a_end)
-    b_ranges = expand(b_start, b_end)
-
-    for ar in a_ranges:
-        for br in b_ranges:
-            if ar[0] < br[1] and br[0] < ar[1]:
-                return True
-    return False
-
-for i in range(len(enabled_windows)):
-    for j in range(i + 1, len(enabled_windows)):
-        if windows_overlap(enabled_windows[i], enabled_windows[j]):
-            la = enabled_windows[i]['label']
-            lb = enabled_windows[j]['label']
-            print(f'ERROR: overlapping windows: {la} and {lb}', file=sys.stderr)
-            print('LAUNCH: no')
-            print('WINDOW_TYPE: none')
-            print(f'decision=abort reason=overlapping_windows windows={la},{lb}')
-            sys.exit(0)
-
-# Check all enabled windows
-matched_window = None
-matched_type = 'work'
-trigger_hit = False
-consecutive_run = False
-
-for w in enabled_windows:
-    if not in_window(w['start'], w['end'], now_minutes):
-        continue
-    matched_window = w['label']
-    matched_type = w.get('type', 'work')
-
-    # Check triggers within +-45s tolerance
-    for trigger in w.get('triggers', []):
-        trigger_sec = time_to_seconds(trigger)
-        diff = abs(now_seconds - trigger_sec)
-        # Handle midnight wrap for diff
-        if diff > 43200:
-            diff = 86400 - diff
-        if diff <= TRIGGER_TOLERANCE_SEC:
-            trigger_hit = True
-            break
-
-    if not trigger_hit:
-        # Inside window, no trigger match -- consecutive run if no lock
-        if not os.path.exists(lock_file):
-            consecutive_run = True
-    break
-
-# Check one_off entries (+-45s tolerance, creates implicit window)
-one_off_hit = False
-one_off_label = ''
-one_off_type = 'work'
-for entry in schedule.get('one_off', []):
-    if entry.get('fired', True):
-        continue
-    dt_str = entry.get('datetime', '')
-    if not dt_str:
-        continue
-    try:
-        dt = datetime.fromisoformat(dt_str)
-        diff_sec = abs((now - dt.replace(tzinfo=None)).total_seconds())
-        if diff_sec <= TRIGGER_TOLERANCE_SEC:
-            one_off_hit = True
-            one_off_label = entry.get('label', 'unnamed')
-            one_off_type = entry.get('type', 'work')
-            # Mark as fired
-            entry['fired'] = True
-            tmp = schedule_file + '.tmp'
-            with open(tmp, 'w') as f:
-                json.dump(schedule, f, indent=2)
-            os.replace(tmp, schedule_file)
-            break
-    except (ValueError, TypeError):
-        continue
-
-if trigger_hit:
-    print('LAUNCH: yes')
-    print(f'WINDOW_TYPE: {matched_type}')
-    print(f'decision=launch reason=trigger_match window={matched_window}')
-elif one_off_hit:
-    print('LAUNCH: yes')
-    print(f'WINDOW_TYPE: {one_off_type}')
-    print(f'decision=launch reason=one_off_match label={one_off_label}')
-elif consecutive_run:
-    print('LAUNCH: yes')
-    print(f'WINDOW_TYPE: {matched_type}')
-    print(f'decision=launch reason=consecutive_run window={matched_window}')
-elif matched_window:
-    # Inside window but lock exists -- another session is running
-    print('LAUNCH: no')
-    print(f'WINDOW_TYPE: {matched_type}')
-    print(f'decision=skip reason=inside_window_but_locked window={matched_window}')
-else:
-    print('LAUNCH: no')
-    print('WINDOW_TYPE: none')
-    print('decision=skip reason=outside_all_windows')
-" "$SCHEDULE_FILE" "$LOCK_FILE_PRE" 2>&1)
+  window_result=$(python3 "$PROJECT_DIR/scripts/check_window.py" check \
+    --schedule-file "$SCHEDULE_FILE" --lock-file "$LOCK_FILE_PRE" 2>&1)
 
   log_line "Window check result: $window_result"
 
   window_launch=$(echo "$window_result" | grep '^LAUNCH:' | head -1 | awk '{print $2}')
   WINDOW_TYPE=$(echo "$window_result" | grep '^WINDOW_TYPE:' | head -1 | awk '{print $2}')
+  ONE_OFF_INDEX=$(echo "$window_result" | grep '^one_off_index:' | head -1 | awk '{print $2}')
   export WINDOW_TYPE
   log_line "Window type: $WINDOW_TYPE"
 
@@ -289,6 +143,11 @@ else:
 else
   log_line "Gate 2 (window check) skipped — TRIGGER_MODE=$TRIGGER_MODE."
 fi
+
+# --- Gate 3 retired: session-count hard cap was downgraded to informational-only
+# (see `current_count` above — tracked but no longer enforced). Numbering below
+# kept as "Gate 4" for continuity with existing logs/diagrams rather than
+# renumbering everything for a cosmetic gap. ---
 
 # --- Gate 4: no session already running (all modes) ---
 LOCK_FILE="$STATE_DIR/session.lock"
@@ -301,6 +160,13 @@ if [ -f "$LOCK_FILE" ]; then
     log_line "WARNING: stale lock found (PID ${locked_pid:-unknown} is dead). Removing and proceeding."
     rm -f "$LOCK_FILE"
   fi
+fi
+
+# Gate 4 has passed — safe now to consume the one_off entry detected in Gate 2.
+if [ -n "$ONE_OFF_INDEX" ]; then
+  python3 "$PROJECT_DIR/scripts/check_window.py" mark-fired \
+    --schedule-file "$SCHEDULE_FILE" --one-off-index "$ONE_OFF_INDEX" 2>&1 \
+    | while IFS= read -r _line; do log_line "$_line"; done
 fi
 
 # --- Pre-launch: clean up any stale temp files from crashed previous sessions ---
@@ -489,9 +355,9 @@ if [ -f "$BEHAVIORAL_TOOL" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
 fi
 
 # --- Prune processed inbox entries older than 7 days (non-fatal) ---
-INBOX_READ="$PROJECT_DIR/tools/inbox_read.py"
-if [ -f "$INBOX_READ" ]; then
-  _prune_result=$(/usr/bin/python3 "$INBOX_READ" --prune 2>/dev/null || echo "")
+INBOX_TOOL="$PROJECT_DIR/tools/inbox.py"
+if [ -f "$INBOX_TOOL" ]; then
+  _prune_result=$(/usr/bin/python3 "$INBOX_TOOL" prune 2>/dev/null || echo "")
   [ -n "$_prune_result" ] && log_line "$_prune_result" || true
 fi
 
@@ -506,11 +372,17 @@ else
 fi
 log_line "Using model: $SESSION_MODEL"
 
+# set +e around the launch: a crashed/killed/non-zero-exiting session must NOT
+# abort wake.sh here under `set -e`, or all the post-session bookkeeping below
+# (Loom session end, relationship update, consecutive-philosophy counter,
+# analytics fallback) gets silently skipped for exactly the sessions — crashes —
+# where you'd most want a record.
+set +e
 claude --dangerously-skip-permissions --model "$SESSION_MODEL" < "$session_prompt" \
   >> "$LOG_DIR/session_${night_id}_${new_count}.out" \
   2>> "$LOG_DIR/session_${night_id}_${new_count}.err"
-
 exit_code=$?
+set -e
 session_end_epoch=$(date +%s)
 duration_min=$(( (session_end_epoch - session_start_epoch) / 60 ))
 
@@ -562,7 +434,7 @@ fi
 # --skip-if-exists: if agent already wrote it during its own shutdown, preserve the richer record.
 ANALYTICS_TOOL="$PROJECT_DIR/tools/analytics_write.py"
 if [ -f "$ANALYTICS_TOOL" ]; then
-  CONTEXT_PCT_AT_EXIT=$(bash "$PROJECT_DIR/tools/check_context.sh" 2>/dev/null \
+  CONTEXT_PCT_AT_EXIT=$(bash "$PROJECT_DIR/tools/check_session.sh" --context 2>/dev/null \
     | grep "context_pct_estimate" | grep -oP '\d+(?=%)' | head -1 || echo "0")
   /usr/bin/python3 "$ANALYTICS_TOOL" \
     --session-type "${CURRENT_SESSION_TYPE:-execution}" \

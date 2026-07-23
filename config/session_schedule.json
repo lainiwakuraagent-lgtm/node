@@ -1,40 +1,29 @@
 {
-  "version": 1,
-  "recurring": [
+  "version": 2,
+  "windows": [
     {
-      "slot": "23:00",
-      "trigger": "nightly",
-      "session_type": "planning",
-      "label": "Open the night — scope work, check direction, set the plan",
-      "enabled": true
+      "label": "nightly-work",
+      "type": "work",
+      "enabled": true,
+      "start": "23:00",
+      "end": "03:40",
+      "triggers": ["23:00", "01:10", "02:25"]
     },
     {
-      "slot": "01:10",
-      "trigger": "nightly",
-      "session_type": "execution",
-      "label": "First execution block — post-reset, primary work",
-      "enabled": true
+      "label": "nightly-maintenance",
+      "type": "maintenance",
+      "enabled": true,
+      "start": "03:40",
+      "end": "04:55",
+      "triggers": ["03:40"]
     },
     {
-      "slot": "02:25",
-      "trigger": "nightly",
-      "session_type": "execution",
-      "label": "Second execution block — continue or complete",
-      "enabled": true
-    },
-    {
-      "slot": "03:40",
-      "trigger": "nightly",
-      "session_type": "maintenance",
-      "label": "Audit the night — what broke, what was missed, produce report",
-      "enabled": true
-    },
-    {
-      "slot": "04:55",
-      "trigger": "nightly",
-      "session_type": "reflection",
-      "label": "Close the night — integrate, identity check, update summary",
-      "enabled": true
+      "label": "nightly-reflection",
+      "type": "reflection",
+      "enabled": true,
+      "start": "04:55",
+      "end": "06:00",
+      "triggers": ["04:55"]
     }
   ],
   "one_off": []

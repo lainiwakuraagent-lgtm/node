@@ -4,19 +4,12 @@ flowchart TD
     WS[wake.sh\nlauncher]
 
     subgraph Gates["Gate checks (pre-launch)"]
-        CU[check_usage.sh\nGate 0 — reads Claude API\nusage via claude /status\nAborts if limit exceeded]
-        CT[check_time.sh\ntime window awareness\nreports remaining minutes\nfor agent self-pacing]
-        CC[check_context.sh\ncontext window estimate\nfrom log file size\nused mid-session too]
+        CS[check_session.sh\nunified: --usage (Gate 0, reads Claude\nAPI usage, aborts if limit exceeded)\n--time (window awareness)\n--context (context window estimate,\nused mid-session too)]
     end
 
     subgraph Inbox["Inbox processing (session start)"]
-        IS[inbox_startup.py\nreads inbox/pending.json\ncreates Loom tasks from\ntask_request entries]
-        IR[inbox_read.py\nread + prune entries\n--prune removes >7d old]
-        IA[inbox_append.py\nwrite new entry to\npending.json — used by conv layer]
+        IB[inbox.py\nstartup: reads pending.json, creates\nLoom tasks from task_request entries\nread: inspect + prune entries\nappend: write new entry — used by conv layer]
     end
 
-    WS -->|Gate 0| CU
-    WS -->|informational| CT
-    WS -->|post-orient| CC
-    WS -->|session start| IS
-    IS --> IR
+    WS -->|Gate 0| CS
+    WS -->|session start| IB

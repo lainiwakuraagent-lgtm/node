@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
 """
-inbox_startup.py — Process inbox at execution session start.
+inbox.py — Unified inbox tool.
 
-Reads unprocessed inbox/pending.json entries and handles each by type:
-  task_request   → creates a Loom task in the active goal (status=triage)
-  verified_task  → creates a Loom task pre-approved by Ting (status=ready, tag=verified)
-  idea           → appends to memory/work/lain_notes.md
-  agent_message  → logs to memory/work/agent_messages.md
-  context_update → appends to memory/work/context_updates.md
-  file_delivery  → creates a Loom task with file path and caption
+Subcommands:
+  startup [--dry-run] [--types TYPE1,TYPE2]
+      Process unprocessed inbox/pending.json entries at session start.
+      Handles: task_request, verified_task, idea, agent_message, context_update,
+               file_delivery, task_comment, sop_comment, sop_change, sop_request,
+               schedule_directive.
 
-Marks all processed entries as processed after handling.
-Prints a human-readable summary for session briefing.
+  read [--summary] [--mark-read] [--prune]
+      Read and inspect inbox entries.
+        (no flag)     -- print unprocessed entries as JSON
+        --summary     -- print human-readable summary
+        --mark-read   -- mark all unprocessed as processed after reading
+        --prune       -- remove processed entries older than 7 days
 
-Usage:
-    python3 tools/inbox_startup.py [--dry-run]
+  append --type TYPE --content TEXT [--from SENDER] [--source CHANNEL]
+      Append a new entry to inbox/pending.json.
+      Types: task_request | idea | agent_message | context_update | file_delivery
 
-Exit 0 always (non-fatal: inbox processing failure should not abort the session).
+  prune
+      Remove processed entries older than 7 days (shortcut for read --prune).
+
+All subcommands exit 0 always. inbox processing failures are non-fatal.
 """
 
 import argparse
@@ -24,6 +31,8 @@ import json
 import subprocess
 import sys
 import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -44,6 +53,28 @@ CONV_LOCK_FILE = PROJECT_DIR / "state" / "conversation.lock"
 SESSION_SCHEDULE_FILE = PROJECT_DIR / "config" / "session_schedule.json"
 MAINTENANCE_DECISIONS = PROJECT_DIR / "logs" / "maintenance_decisions.md"
 
+PRUNE_DAYS = 7
+VALID_TYPES = {"task_request", "idea", "agent_message", "context_update", "file_delivery"}
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def normalize_ts(ts) -> float:
+    """Convert timestamp (int/float/ISO string) to Unix float. Returns 0.0 on failure."""
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str):
+        try:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except (ValueError, AttributeError):
+            pass
+    return 0.0
+
 
 def load_inbox() -> list:
     if not INBOX_FILE.exists():
@@ -60,31 +91,19 @@ def save_inbox(entries: list) -> None:
     tmp.rename(INBOX_FILE)
 
 
+def ts_str(ts: int) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+
+
 def append_to_file(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
         f.write(content)
 
 
-def ts_str(ts: int) -> str:
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
-
-
-def normalize_ts(ts) -> float:
-    """Convert timestamp (int/float/ISO string) to Unix float. Returns 0.0 on failure."""
-    if isinstance(ts, (int, float)):
-        return float(ts)
-    if isinstance(ts, str):
-        try:
-            from datetime import datetime, timezone
-            dt = datetime.fromisoformat(ts)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.timestamp()
-        except (ValueError, AttributeError):
-            pass
-    return 0.0
-
+# ---------------------------------------------------------------------------
+# startup — session start inbox processor
+# ---------------------------------------------------------------------------
 
 def create_loom_task(content: str, from_: str, status: str = "triage", tags: str = "inbox") -> bool:
     """Create a Loom task. Returns True on success."""
@@ -172,11 +191,11 @@ def handle_schedule_directive(entry: dict, dry_run: bool) -> str:
     Apply a schedule_directive inbox entry to config/session_schedule.json.
 
     Supported actions:
-      adjust_triggers    — replace trigger list in a named window
-      set_window_enabled — enable or disable a window
-      add_window         — add a new window entry
-      remove_window      — remove a window by label
-      set_type_hint      — set session_type_hint on a window
+      adjust_triggers    -- replace trigger list in a named window
+      set_window_enabled -- enable or disable a window
+      add_window         -- add a new window entry
+      remove_window      -- remove a window by label
+      set_type_hint      -- set session_type_hint on a window
     """
     action = entry.get("action", "")
     payload = entry.get("payload", {})
@@ -187,11 +206,10 @@ def handle_schedule_directive(entry: dict, dry_run: bool) -> str:
     if dry_run:
         return f"[DRY RUN] schedule_directive action={action} payload={payload}"
 
-    # Load current schedule
     try:
         sched = json.loads(SESSION_SCHEDULE_FILE.read_text())
     except (OSError, json.JSONDecodeError) as e:
-        return f"schedule_directive → FAILED: could not read session_schedule.json: {e}"
+        return f"schedule_directive -> FAILED: could not read session_schedule.json: {e}"
 
     windows = sched.get("windows", [])
     label = payload.get("window_label", "")
@@ -203,23 +221,23 @@ def handle_schedule_directive(entry: dict, dry_run: bool) -> str:
     if action == "adjust_triggers":
         new_triggers = payload.get("new_triggers", [])
         if window is None:
-            return f"schedule_directive → FAILED: window '{label}' not found"
+            return f"schedule_directive -> FAILED: window '{label}' not found"
         old_triggers = window.get("triggers", [])
         window["triggers"] = new_triggers
         applied = True
-        detail = f"triggers {old_triggers} → {new_triggers}"
+        detail = f"triggers {old_triggers} -> {new_triggers}"
 
     elif action == "set_window_enabled":
         enabled = payload.get("enabled", True)
         if window is None:
-            return f"schedule_directive → FAILED: window '{label}' not found"
+            return f"schedule_directive -> FAILED: window '{label}' not found"
         window["enabled"] = enabled
         applied = True
         detail = f"enabled={enabled}"
 
     elif action == "add_window":
         if window is not None:
-            return f"schedule_directive → FAILED: window '{label}' already exists"
+            return f"schedule_directive -> FAILED: window '{label}' already exists"
         new_window = {
             "label": label,
             "type": payload.get("type", "work"),
@@ -237,7 +255,7 @@ def handle_schedule_directive(entry: dict, dry_run: bool) -> str:
 
     elif action == "remove_window":
         if window is None:
-            return f"schedule_directive → FAILED: window '{label}' not found"
+            return f"schedule_directive -> FAILED: window '{label}' not found"
         windows = [w for w in windows if w.get("label") != label]
         sched["windows"] = windows
         applied = True
@@ -246,26 +264,24 @@ def handle_schedule_directive(entry: dict, dry_run: bool) -> str:
     elif action == "set_type_hint":
         hint = payload.get("session_type_hint", "")
         if window is None:
-            return f"schedule_directive → FAILED: window '{label}' not found"
+            return f"schedule_directive -> FAILED: window '{label}' not found"
         window["session_type_hint"] = hint
         applied = True
         detail = f"session_type_hint='{hint}'"
 
     else:
-        return f"schedule_directive → unknown action '{action}'"
+        return f"schedule_directive -> unknown action '{action}'"
 
     if not applied:
-        return f"schedule_directive → no change applied"
+        return "schedule_directive -> no change applied"
 
-    # Atomic write
     tmp = SESSION_SCHEDULE_FILE.with_suffix(".tmp")
     try:
         tmp.write_text(json.dumps(sched, indent=2))
         tmp.rename(SESSION_SCHEDULE_FILE)
     except OSError as e:
-        return f"schedule_directive → FAILED: write error: {e}"
+        return f"schedule_directive -> FAILED: write error: {e}"
 
-    # Log to maintenance_decisions.md
     ts_now = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
     log_entry = (
         f"\n## {ts_now} — schedule_directive (from={source}, week={week})\n"
@@ -277,9 +293,9 @@ def handle_schedule_directive(entry: dict, dry_run: bool) -> str:
         with MAINTENANCE_DECISIONS.open("a") as f:
             f.write(log_entry)
     except OSError:
-        pass  # Non-fatal
+        pass
 
-    return f"schedule_directive → applied: {action} {detail}"
+    return f"schedule_directive -> applied: {action} {detail}"
 
 
 def process_entry(entry: dict, dry_run: bool) -> str:
@@ -295,28 +311,27 @@ def process_entry(entry: dict, dry_run: bool) -> str:
     if etype == "task_request":
         ok = create_loom_task(content, from_)
         status = "loom task created" if ok else "loom task FAILED"
-        return f"task_request → {status}: {content[:60]}"
+        return f"task_request -> {status}: {content[:60]}"
 
     elif etype == "verified_task":
-        # Pre-approved by Ting (orchestrator) — goes straight to ready, not triage
         ok = create_loom_task(content, from_, status="ready", tags="inbox,verified")
         status = "loom task created (ready)" if ok else "loom task FAILED"
-        return f"verified_task → {status}: {content[:60]}"
+        return f"verified_task -> {status}: {content[:60]}"
 
     elif etype == "idea":
         note = f"\n---\n[{ts_str(ts)}] from={from_}\n{content}\n"
         append_to_file(LAIN_NOTES, note)
-        return f"idea → appended to lain_notes.md: {content[:60]}"
+        return f"idea -> appended to lain_notes.md: {content[:60]}"
 
     elif etype == "agent_message":
         note = f"\n[{ts_str(ts)}] from={from_}\n{content}\n"
         append_to_file(AGENT_MESSAGES, note)
-        return f"agent_message → logged: {content[:60]}"
+        return f"agent_message -> logged: {content[:60]}"
 
     elif etype == "context_update":
         note = f"\n[{ts_str(ts)}] from={from_}\n{content}\n"
         append_to_file(CONTEXT_UPDATES, note)
-        return f"context_update → applied: {content[:60]}"
+        return f"context_update -> applied: {content[:60]}"
 
     elif etype == "file_delivery":
         file_path = entry.get("file_path", "unknown")
@@ -324,13 +339,13 @@ def process_entry(entry: dict, dry_run: bool) -> str:
         task_desc = f"File from {from_}: {file_name} at {file_path} — {content}"
         ok = create_loom_task(task_desc[:80], from_, status="triage", tags="inbox,file")
         status = "loom task created" if ok else "loom task FAILED"
-        return f"file_delivery → {status}: {file_name} ({content[:40]})"
+        return f"file_delivery -> {status}: {file_name} ({content[:40]})"
 
     elif etype == "task_comment":
         task_id = entry.get("task_id")
         text_content = entry.get("text") or content
         if not task_id or not text_content:
-            return f"task_comment → skipped: missing task_id or text"
+            return "task_comment -> skipped: missing task_id or text"
         try:
             import sqlite3 as _sqlite3
             import datetime as _dt
@@ -342,25 +357,22 @@ def process_entry(entry: dict, dry_run: bool) -> str:
             )
             conn.commit()
             conn.close()
-            return f"task_comment → comment logged on T{task_id}: {text_content[:60]}"
+            return f"task_comment -> comment logged on T{task_id}: {text_content[:60]}"
         except Exception as e:
-            return f"task_comment → DB error ({e}): task={task_id}"
+            return f"task_comment -> DB error ({e}): task={task_id}"
 
     elif etype in ("sop_comment", "sop_change"):
         sop_id = entry.get("sop_id", entry.get("path", "?"))
-        return f"{etype} → acknowledged: sop={sop_id} from={from_}: {content[:60]}"
+        return f"{etype} -> acknowledged: sop={sop_id} from={from_}: {content[:60]}"
 
     elif etype == "schedule_directive":
         return handle_schedule_directive(entry, dry_run)
 
     elif etype == "sop_request":
         title = entry.get("title", "untitled SOP")
-        instructions = entry.get("content", "")
         task_name = f"Write SOP: {title}"
-        task_desc = f"SOP request from {from_}: {instructions}"
         ok = create_loom_task(task_name[:80], from_, status="scheduled", tags="sop")
         if ok:
-            # Wire to goal 1 (self-improvement tooling)
             try:
                 import sqlite3 as _sqlite3
                 conn = _sqlite3.connect(str(LOOM_DB))
@@ -372,38 +384,34 @@ def process_entry(entry: dict, dry_run: bool) -> str:
             except Exception:
                 pass
         status_str = "loom task created (scheduled, goal 1)" if ok else "loom task FAILED"
-        return f"sop_request → {status_str}: {title[:60]}"
+        return f"sop_request -> {status_str}: {title[:60]}"
 
     else:
         return f"unknown type '{etype}' — skipped"
 
 
-def notify_queue_empty_if_needed() -> str | None:
+def notify_queue_empty_if_needed() -> "str | None":
     """
     If the Loom queue is empty and no conversation is active, write a
-    notification to outbox so Andrii knows to dispatch new work.
+    notification to outbox so the owner knows to dispatch new work.
     Rate-limited to once per 2 hours. Disabled by state/queue_empty_notify.disabled.
-    Returns a status string (for logging) or None if nothing was done.
     """
     if QUEUE_NOTIFY_DISABLED.exists():
         return None
 
-    # Check conversation.lock — if conversation is active, owner is present; skip
     try:
         if CONV_LOCK_FILE.exists():
             pid = int(CONV_LOCK_FILE.read_text().strip())
             import os as _os
             _os.kill(pid, 0)
-            return None  # conversation active — owner can ask directly
+            return None
     except (ValueError, ProcessLookupError, OSError):
         pass
 
-    # Only fire for execution sessions
-    session_type = (PROJECT_DIR / "state" / "current_session_type.txt")
-    if not session_type.exists() or session_type.read_text().strip() != "execution":
+    session_type_file = PROJECT_DIR / "state" / "current_session_type.txt"
+    if not session_type_file.exists() or session_type_file.read_text().strip() != "execution":
         return None
 
-    # Check loom_context for empty queue
     if not LOOM_CONTEXT_FILE.exists():
         return None
     try:
@@ -411,24 +419,20 @@ def notify_queue_empty_if_needed() -> str | None:
     except (json.JSONDecodeError, OSError):
         return None
 
-    ready = ctx.get("ready_queue") or []
-    current = ctx.get("current_task")
-    if ready or current:
-        return None  # queue is not empty
+    if ctx.get("ready_queue") or ctx.get("current_task"):
+        return None
 
-    # Rate limit: no more than once per 2 hours
     now = time.time()
     if QUEUE_NOTIFY_TS_FILE.exists():
         try:
             last_ts = float(QUEUE_NOTIFY_TS_FILE.read_text().strip())
-            if now - last_ts < 7200:  # 2 hours
+            if now - last_ts < 7200:
                 return None
         except (ValueError, OSError):
             pass
 
-    # Write notification to outbox
+    # Write directly to the outbox file to avoid circular dependency with outbox.py
     try:
-        import uuid
         OUTBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
         entries = []
         if OUTBOX_FILE.exists():
@@ -441,7 +445,7 @@ def notify_queue_empty_if_needed() -> str | None:
             "from": "execution_layer",
             "type": "message",
             "to": "owner",
-            "content": "@Lain — queue is empty. Nothing ready to execute. Waiting for new tasks.",
+            "content": "queue is empty. Nothing ready to execute. Waiting for new tasks.",
             "timestamp": int(now),
             "sent": False,
         }
@@ -453,8 +457,8 @@ def notify_queue_empty_if_needed() -> str | None:
         return f"queue-empty notify failed: {e}"
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
+def main_startup() -> int:
+    parser = argparse.ArgumentParser(description="Process inbox entries at session start")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--types",
@@ -466,19 +470,14 @@ def main() -> int:
 
     allowed_types = set(args.types.split(",")) if args.types else None
 
-    # Queue-empty notification (execution sessions only, when no conversation active)
-    # Skip when filtering by type — this is a lightweight pre-launch pass.
     if not args.dry_run and allowed_types is None:
         notify_result = notify_queue_empty_if_needed()
         if notify_result:
-            print(f"  • {notify_result}")
+            print(f"  * {notify_result}")
 
-    # Extract any owner directives from the last conversational checkpoint.
-    # Skip when filtering by type — checkpoint injection is a full-pass concern.
     if allowed_types is None:
-        cp_results = extract_checkpoint_directives(args.dry_run)
-        for r in cp_results:
-            print(f"  • {r}")
+        for r in extract_checkpoint_directives(args.dry_run):
+            print(f"  * {r}")
 
     entries = load_inbox()
     unprocessed = [
@@ -492,11 +491,8 @@ def main() -> int:
         return 0
 
     print(f"inbox: {len(unprocessed)} unprocessed entries — processing now")
-    results = []
     for e in unprocessed:
-        status = process_entry(e, args.dry_run)
-        results.append(status)
-        print(f"  • {status}")
+        print(f"  * {process_entry(e, args.dry_run)}")
 
     if not args.dry_run:
         for e in entries:
@@ -505,20 +501,143 @@ def main() -> int:
             ):
                 e["processed"] = True
         save_inbox(entries)
-        print(f"inbox: {len(unprocessed)} entries marked processed"
-              + (f" (types: {args.types})" if allowed_types else ""))
+        suffix = f" (types: {args.types})" if allowed_types else ""
+        print(f"inbox: {len(unprocessed)} entries marked processed{suffix}")
 
-        # Prune processed entries older than 7 days
-        cutoff = time.time() - 7 * 24 * 3600
+        cutoff = time.time() - PRUNE_DAYS * 24 * 3600
         before = len(entries)
-        entries = [e for e in entries if not (e.get("processed") and normalize_ts(e.get("timestamp", 0)) < cutoff)]
+        entries = [
+            e for e in entries
+            if not (e.get("processed") and normalize_ts(e.get("timestamp", 0)) < cutoff)
+        ]
         pruned = before - len(entries)
         if pruned:
             save_inbox(entries)
-            print(f"inbox: pruned {pruned} processed entries older than 7 days")
+            print(f"inbox: pruned {pruned} processed entries older than {PRUNE_DAYS} days")
 
     return 0
 
 
+# ---------------------------------------------------------------------------
+# read — inspect inbox entries
+# ---------------------------------------------------------------------------
+
+def format_summary(entries: list) -> str:
+    if not entries:
+        return "inbox: empty"
+    lines = [f"inbox: {len(entries)} unprocessed entries"]
+    for i, e in enumerate(entries, 1):
+        ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(e.get("timestamp", 0)))
+        lines.append(f"  [{i}] [{e.get('type','?')}] from={e.get('from','?')} at={ts}")
+        lines.append(f"      {e.get('content','')[:120]}")
+    return "\n".join(lines)
+
+
+def prune_inbox() -> str:
+    """Remove processed entries older than PRUNE_DAYS. Returns a status string."""
+    entries = load_inbox()
+    if not entries:
+        return "inbox: empty, nothing to prune"
+    cutoff = time.time() - PRUNE_DAYS * 24 * 3600
+    before = len(entries)
+    entries = [
+        e for e in entries
+        if not (e.get("processed") and normalize_ts(e.get("timestamp", 0)) < cutoff)
+    ]
+    pruned = before - len(entries)
+    if pruned:
+        save_inbox(entries)
+        return f"inbox: pruned {pruned} processed entries older than {PRUNE_DAYS}d ({len(entries)} remain)"
+    return f"inbox: nothing to prune ({len(entries)} entries, all recent)"
+
+
+def main_read() -> int:
+    parser = argparse.ArgumentParser(description="Read inbox/pending.json")
+    parser.add_argument("--mark-read", action="store_true", help="Mark all entries as processed")
+    parser.add_argument("--summary", action="store_true", help="Print human-readable summary")
+    parser.add_argument("--prune", action="store_true",
+                        help=f"Remove processed entries older than {PRUNE_DAYS} days")
+    args = parser.parse_args()
+
+    if args.prune:
+        print(prune_inbox())
+        return 0
+
+    entries = load_inbox()
+    unprocessed = [e for e in entries if not e.get("processed", False)]
+
+    if args.summary:
+        print(format_summary(unprocessed))
+    else:
+        print(json.dumps(unprocessed, indent=2))
+
+    if args.mark_read and unprocessed:
+        for e in entries:
+            if not e.get("processed", False):
+                e["processed"] = True
+        save_inbox(entries)
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# append — write a new inbox entry
+# ---------------------------------------------------------------------------
+
+def main_append() -> int:
+    parser = argparse.ArgumentParser(description="Append to inbox/pending.json")
+    parser.add_argument("--type", required=True, choices=sorted(VALID_TYPES), help="Entry type")
+    parser.add_argument("--content", required=True, help="Message content")
+    parser.add_argument("--from", dest="from_", default="andrii", help="Source agent/user")
+    parser.add_argument("--source", default="telegram",
+                        help="Channel (telegram, nexus, internal)")
+    args = parser.parse_args()
+
+    entry = {
+        "source": args.source,
+        "from": args.from_,
+        "content": args.content,
+        "timestamp": int(time.time()),
+        "type": args.type,
+        "processed": False,
+    }
+
+    entries = load_inbox()
+    entries.append(entry)
+    INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
+    save_inbox(entries)
+
+    print(json.dumps(entry))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# prune — shortcut subcommand
+# ---------------------------------------------------------------------------
+
+def main_prune() -> int:
+    print(prune_inbox())
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
-    sys.exit(main())
+    if len(sys.argv) < 2:
+        print("Usage: inbox.py <startup|read|append|prune> [args]", file=sys.stderr)
+        sys.exit(1)
+    cmd = sys.argv.pop(1)
+    if cmd == "startup":
+        sys.exit(main_startup())
+    elif cmd == "read":
+        sys.exit(main_read())
+    elif cmd == "append":
+        sys.exit(main_append())
+    elif cmd == "prune":
+        sys.exit(main_prune())
+    else:
+        print(f"Unknown subcommand: {cmd}", file=sys.stderr)
+        print("Usage: inbox.py <startup|read|append|prune> [args]", file=sys.stderr)
+        sys.exit(1)

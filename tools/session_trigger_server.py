@@ -72,7 +72,7 @@ def fire_session() -> str:
         cmd.append(persona)
 
     env = os.environ.copy()
-    env["XDG_RUNTIME_DIR"] = "/run/user/1001"
+    env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
     # Signal to wake.sh that this is a manual trigger — bypasses time window
     env["TRIGGER_MODE"] = "manual"
 
