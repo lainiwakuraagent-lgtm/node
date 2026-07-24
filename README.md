@@ -39,7 +39,10 @@ cp identity/credentials.md.example identity/credentials.md
 # 3. Define the agent
 cp prompts/goal.txt.example prompts/goal.txt
 cp prompts/persona.txt.example prompts/persona.txt
-# Edit both files
+cp prompts/default_goal.txt.example prompts/default_goal.txt
+# Edit goal.txt and persona.txt for your agent. default_goal.txt is what
+# wake.sh falls back to if goal.txt is ever marked "GOAL_STATUS: complete"
+# with nothing queued to replace it -- the template default is usually fine.
 
 # 4. Configure environment
 cp state/agent_config.env.example state/agent_config.env

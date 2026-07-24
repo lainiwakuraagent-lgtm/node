@@ -15,6 +15,5 @@ focus_hint: >
   Check GitHub PAT validity with curl before assuming it is live.
   Verify Telegram webhook health (no 409 Conflict, watcher responding).
   Audit wake.sh gate state: is state/emergency_mode.active stale?
-  Check logs/wake.log size (rotation threshold: 1MB). Verify state/node_version.txt
-  matches actual blank_node HEAD. Goal: confirm the operational layer is actually
-  running correctly, not just assumed to be.
+  Check logs/wake.log size (rotation threshold: 1MB). Goal: confirm the
+  operational layer is actually running correctly, not just assumed to be.
