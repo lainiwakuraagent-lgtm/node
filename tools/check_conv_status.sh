@@ -20,6 +20,7 @@
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SERVICE_NAME="conversation@$(basename "$PROJECT_DIR").service"
 LOCK_FILE="$PROJECT_DIR/state/conversation.lock"
 BUDGET_FILE="$PROJECT_DIR/state/conversation/context_budget.json"
 WATCHER_PID_FILE="$PROJECT_DIR/state/conversation/watcher.pid"
@@ -89,9 +90,9 @@ fi
 
 if [ "$TEXT_MODE" -eq 1 ]; then
     if [ "$running" = "true" ]; then
-        echo "conversation.service: RUNNING (PID $pid, uptime ${uptime_seconds}s)"
+        echo "$SERVICE_NAME: RUNNING (PID $pid, uptime ${uptime_seconds}s)"
     else
-        echo "conversation.service: NOT RUNNING"
+        echo "$SERVICE_NAME: NOT RUNNING"
     fi
     echo "watcher: $watcher_running"
     echo "context: ${context_pct}%"

@@ -31,6 +31,8 @@ STATE_DIR="$PROJECT_DIR/state"
 SCRIPTS_DIR="$PROJECT_DIR/scripts"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 EMERGENCY_FLAG="$STATE_DIR/emergency_mode.active"
+INSTANCE="$(basename "$PROJECT_DIR")"
+TIMER_UNIT="emergency-agent@${INSTANCE}.timer"
 
 if [ $# -lt 1 ]; then
   echo "Usage: emergency_mode.sh <on|off> [interval_min] [reason]" >&2
@@ -62,13 +64,15 @@ if [ "$ACTION" = "on" ]; then
   echo "[OK] Emergency flag written: $EMERGENCY_FLAG"
 
   # 2. Install user-level systemd units.
-  # The timer interval is written dynamically so no manual edits to the .timer
-  # file are needed — just pass a different interval to this script.
+  # emergency-agent@.service is an instance template (%i = this clone's
+  # directory name, ${INSTANCE}) -- install the template once; the timer
+  # interval is written dynamically per-instance so no manual edits to the
+  # .timer file are needed, just pass a different interval to this script.
   mkdir -p "$SYSTEMD_USER_DIR"
-  cp "$SCRIPTS_DIR/emergency-agent.service" "$SYSTEMD_USER_DIR/emergency-agent.service"
-  cat > "$SYSTEMD_USER_DIR/emergency-agent.timer" <<EOF
+  cp "$SCRIPTS_DIR/emergency-agent@.service" "$SYSTEMD_USER_DIR/emergency-agent@.service"
+  cat > "$SYSTEMD_USER_DIR/${TIMER_UNIT}" <<EOF
 [Unit]
-Description=Emergency Agent Timer — fires every ${INTERVAL_MIN} minutes
+Description=Emergency Agent Timer — ${INSTANCE} — fires every ${INTERVAL_MIN} minutes
 
 [Timer]
 OnActiveSec=1min
@@ -78,7 +82,7 @@ Persistent=false
 [Install]
 WantedBy=timers.target
 EOF
-  echo "[OK] Systemd units installed to $SYSTEMD_USER_DIR (interval: ${INTERVAL_MIN}min)"
+  echo "[OK] Systemd units installed to $SYSTEMD_USER_DIR (instance: ${INSTANCE}, interval: ${INTERVAL_MIN}min)"
 
   # 3. Enable linger so user services survive without an active login session.
   loginctl enable-linger "$(whoami)" 2>/dev/null && echo "[OK] Linger enabled for $(whoami)" \
@@ -92,9 +96,9 @@ EOF
   systemctl --user daemon-reload
   echo "[OK] systemd user daemon reloaded"
 
-  systemctl --user enable emergency-agent.timer
-  systemctl --user start emergency-agent.timer
-  echo "[OK] emergency-agent.timer enabled and started"
+  systemctl --user enable "$TIMER_UNIT"
+  systemctl --user start "$TIMER_UNIT"
+  echo "[OK] $TIMER_UNIT enabled and started"
 
   echo ""
   echo "=== Emergency Mode ACTIVE ==="
@@ -103,7 +107,7 @@ EOF
   echo "Sessions log to: $PROJECT_DIR/logs/"
   echo ""
   echo "To check timer status:"
-  echo "  systemctl --user status emergency-agent.timer"
+  echo "  systemctl --user status $TIMER_UNIT"
   echo ""
   echo "To disable emergency mode:"
   echo "  bash $PROJECT_DIR/tools/emergency_mode.sh off"
@@ -117,20 +121,20 @@ elif [ "$ACTION" = "off" ]; then
   export XDG_RUNTIME_DIR="/run/user/${_uid}"
   export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${_uid}/bus"
 
-  if systemctl --user is-active emergency-agent.timer &>/dev/null; then
-    systemctl --user stop emergency-agent.timer
-    echo "[OK] emergency-agent.timer stopped"
+  if systemctl --user is-active "$TIMER_UNIT" &>/dev/null; then
+    systemctl --user stop "$TIMER_UNIT"
+    echo "[OK] $TIMER_UNIT stopped"
   else
-    echo "[--] emergency-agent.timer was not running"
+    echo "[--] $TIMER_UNIT was not running"
   fi
 
-  if systemctl --user is-enabled emergency-agent.timer &>/dev/null; then
-    systemctl --user disable emergency-agent.timer
-    echo "[OK] emergency-agent.timer disabled"
+  if systemctl --user is-enabled "$TIMER_UNIT" &>/dev/null; then
+    systemctl --user disable "$TIMER_UNIT"
+    echo "[OK] $TIMER_UNIT disabled"
   fi
 
   # 2. Remove the installed unit files.
-  rm -f "$SYSTEMD_USER_DIR/emergency-agent.timer" "$SYSTEMD_USER_DIR/emergency-agent.service"
+  rm -f "$SYSTEMD_USER_DIR/${TIMER_UNIT}" "$SYSTEMD_USER_DIR/emergency-agent@.service"
   echo "[OK] Systemd unit files removed"
 
   systemctl --user daemon-reload

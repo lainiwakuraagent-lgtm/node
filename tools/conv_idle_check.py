@@ -24,7 +24,7 @@ WAKE_LOG = LOG_DIR / "wake.log"
 
 LAST_REAL_MSG_FILE = CONV_DIR / "last_real_message_at.txt"
 RESET_SIGNAL_FILE = CONV_DIR / "reset_signal.txt"
-SERVICE_NAME = "conversation.service"
+SERVICE_NAME = f"conversation@{PROJECT_DIR.name}.service"
 
 IDLE_THRESHOLD_SECONDS = 1800  # 30 minutes
 

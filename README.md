@@ -12,7 +12,7 @@ Built from @Lain's architecture. Tested across hundreds of sessions.
 A **node** is a single autonomous agent instance. It contains:
 
 - **Wake/schedule harness** — `scripts/wake.sh` with three trigger modes (nightly, emergency, manual)
-- **Systemd units** — night timer + emergency timer, user-level (no root needed)
+- **Systemd units** — night timer + emergency timer, user-level (no root needed), instance-templated per clone
 - **Tool suite** — Telegram communication, memory tools, analytics, reporting, scheduling
 - **Loom integration** — goal tracking, session lifecycle, task management (required)
 - **Relationship engine** — trust/warmth/friction tracking with behavioral adaptation
@@ -57,12 +57,17 @@ cp state/delivery_routing.json.example state/delivery_routing.json
 # Set "chat_id" to the same value as TELEGRAM_ALLOWED_USERS above
 
 # 6. Install systemd timers
-# night-agent.service currently hardcodes WorkingDirectory and User=andrii --
-# edit those two fields to match your clone's path and system user before
-# copying (no install script yet to template this automatically -- see ROADMAP
-# Phase 1).
-cp scripts/night-agent.* ~/.config/systemd/user/
-systemctl --user enable --now night-agent.timer
+# Units are systemd instance templates: %i = this clone's directory name,
+# %h = your home dir -- no manual path/username editing needed. This DOES
+# require the clone to live at ~/lain/<name> (matching %h/lain/%i); if you
+# cloned it somewhere else, move it there first.
+cp scripts/night-agent@.* ~/.config/systemd/user/
+systemctl --user enable --now "night-agent@$(basename "$PWD").timer"
+
+# The same @-instance pattern applies to emergency-agent@, conv-watchdog@,
+# and conversation@ units (scripts/*.service, scripts/*.timer) -- see
+# tools/emergency_mode.sh for how the emergency timer is installed
+# dynamically, and the Telegram section below for the conversational layer.
 
 # 7. Initialize state
 mkdir -p state logs memory/sessions memory/work
@@ -101,8 +106,10 @@ node/
 │   ├── wake.sh                      # Main launcher — all modes, all gates
 │   ├── interactive.sh               # Owner-triggered interactive session
 │   ├── conversation.sh              # Conversational mode (Telegram, continuous)
-│   ├── night-agent.{service,timer}  # Nightly schedule (systemd)
-│   ├── emergency-agent.{service,timer} # Emergency schedule
+│   ├── night-agent@.{service,timer}    # Nightly schedule (systemd instance template)
+│   ├── emergency-agent@.{service,timer}# Emergency schedule (instance template)
+│   ├── conv-watchdog@.{service,timer}  # Conversation watchdog (instance template)
+│   ├── conversation@.service           # Conversational/Telegram mode (instance template)
 │   ├── resolve_session_type.py      # Session type dispatcher
 │   └── splice_prompt.py             # Prompt construction utility
 ├── tools/
@@ -173,7 +180,13 @@ TELEGRAM_ALLOWED_USERS=<your numeric chat id>
 Once configured, the agent can:
 - Send you status updates and task completion pings via `telegram_send.sh`
 - Respond to `/commands` like `/status`, `/log`, `/goal`, `/report` via `command_dispatcher.py`
-- Enter a real-time conversational mode via `scripts/conversation.sh`
+- Enter a real-time conversational mode via `scripts/conversation.sh`, run continuously as a
+  systemd instance service:
+  ```bash
+  cp scripts/conversation@.service scripts/conv-watchdog@.{service,timer} ~/.config/systemd/user/
+  systemctl --user enable --now "conversation@$(basename "$PWD").service"
+  systemctl --user enable --now "conv-watchdog@$(basename "$PWD").timer"
+  ```
 
 ---
 

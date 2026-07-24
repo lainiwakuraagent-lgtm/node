@@ -1,5 +1,5 @@
 [Unit]
-Description=Emergency Agent Timer — fires every 60 minutes during showcase/daytime mode
+Description=Emergency Agent Timer — %i — fires every 60 minutes during showcase/daytime mode
 
 [Timer]
 # Fire every 60 minutes from the moment the timer is started.

@@ -39,7 +39,7 @@ WATCHDOG_STATE_FILE = CONV_DIR / "watchdog_state.json"
 WAKE_LOG = LOG_DIR / "wake.log"
 
 STALE_THRESHOLD_MINUTES = 15
-SERVICE_NAME = "conversation.service"
+SERVICE_NAME = f"conversation@{PROJECT_DIR.name}.service"
 
 
 def ts() -> str:

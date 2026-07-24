@@ -1,5 +1,5 @@
 [Unit]
-Description=Trigger Night Agent at fixed wake times
+Description=Trigger Night Agent at fixed wake times — %i
 
 [Timer]
 # Five wake times: 23:00 probe slot + four post-reset sessions (~1h15m apart).
