@@ -1,0 +1,37 @@
+id: audit
+name: "Audit Session"
+description: >
+  Review milestone_review-tagged tasks whose dependencies are all done.
+  Fires when such tasks exist in scheduled/in_progress status. Verifies the
+  actual deliverable against what the milestone claimed, checks integration
+  with the rest of the system, and either closes the milestone or spins up
+  follow-up tasks for what's missing.
+
+prompt_file: "prompts/session_types/audit_prompt.md"
+
+context_files:
+  - memory/latest_summary.md
+  - memory/learnings_digest.md
+  - state/behavioral_context.txt
+  - state/loom_context.json
+  - memory/progress.md
+  - memory/index.md
+
+behavioral_overrides:
+  focus_mode: normal
+  verbosity: normal
+  philosophy_allowed: false
+  memory_discipline: normal
+
+focus_hint: >
+  Audit. Read the milestone_review task(s) in state/loom_context.json. Verify
+  the deliverable actually exists, works, and integrates with what it's supposed
+  to touch -- don't take the task description's word for it, check the artifact.
+  Mark the task done if it holds up. If it doesn't, create specific follow-up
+  tasks describing exactly what's missing or broken, and leave the milestone
+  task open until those close.
+
+allowed_triggers:
+  - nightly
+  - manual
+  - emergency
