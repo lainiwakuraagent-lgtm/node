@@ -45,7 +45,7 @@ log_line() { echo "[$(timestamp)] $*" >> "$LOG_DIR/wake.log"; }
   if [ "$_wake_log_size" -gt 1048576 ]; then
     _rotated="$LOG_DIR/wake.log.$(date +%Y%m%d_%H%M%S).gz"
     if gzip -c "$_wake_log" > "$_rotated"; then
-      > "$_wake_log"
+      : > "$_wake_log"
       # Remove all but the 3 most recent rotated files
       # shellcheck disable=SC2012
       ls -t "$LOG_DIR"/wake.log.*.gz 2>/dev/null | tail -n +4 | xargs -r rm -f

@@ -18,7 +18,6 @@ things worth acting on to the inbox for later execution sessions to pick up.
 - Write summary notes to `state/conversation/conv_notes.md` (cross-session conversation context)
 - Append to `inbox/pending.json` when something needs follow-up in an execution session
 - Run `tools/telegram_send.sh` to send replies
-- Run `bash tools/check_nexus.sh` for agent messages
 
 **Not permitted in this mode:**
 - No edits to `memory/` files (latest_summary, progress, learnings, index)
@@ -65,24 +64,19 @@ Then start the message-wait loop below.
 1. Launch `telegram_watcher.py` in background:
    `python3 tools/telegram_watcher.py`
 2. Call `TaskOutput(block=True, timeout=600000)` — wait up to 10 minutes
-3. **On any wakeup** (timeout or message): quick Nexus check first:
-   `bash tools/check_nexus.sh` — non-blocking, fast.
-   If new agent messages found: for each one, call:
-   `python3 tools/inbox.py append --type agent_message --from <sender> --source nexus --content "..."`
-   Then optionally respond via Nexus if the message warrants it.
-4. On timeout (no Telegram message for 10 min): restart watcher, continue loop
-5. On exit_code=0: parse JSON from stdout → Telegram message received
-6. Read the message. Think. Respond.
-6a. **Track answered questions** — if the message you just received answers a question
+3. On timeout (no Telegram message for 10 min): restart watcher, continue loop
+4. On exit_code=0: parse JSON from stdout → Telegram message received
+5. Read the message. Think. Respond.
+5a. **Track answered questions** — if the message you just received answers a question
     you previously sent (check `state/conversation/open_questions.json` for `status: open`
     entries), mark that entry's status as `answered`. Update the file.
-7. Send response via `printf '%s' "response" | bash tools/telegram_send.sh`
-8. Update `state/conversation/thread.json` (append both turns)
-9. Update context budget (run after every exchange):
+6. Send response via `printf '%s' "response" | bash tools/telegram_send.sh`
+7. Update `state/conversation/thread.json` (append both turns)
+8. Update context budget (run after every exchange):
    `python3 tools/update_conv_budget.py`
    This reads check_session.sh --context, increments message counters, and writes
    state/conversation/context_budget.json so /context command stays accurate.
-10. **Check for signals** — on EVERY wakeup (message received OR timeout), check:
+9. **Check for signals** — on EVERY wakeup (message received OR timeout), check:
     - Read `state/conversation/reset_signal.txt` if it exists
     - If `action` is `idle_close`:
       0. Run `python3 tools/escalate_questions.py` (escalates open questions + schedules philosophy session)
@@ -95,8 +89,8 @@ Then start the message-wait loop below.
       2. Delete reset_signal.txt
       3. Write `reset` or `new` to `state/conversation/exit_reason.txt`
       4. Exit 0
-11. If context >= 70%: write checkpoint, write `context_full` to `state/conversation/exit_reason.txt`, exit 0 (conversation.sh will restart)
-12. Else: loop from step 1
+10. If context >= 70%: write checkpoint, write `context_full` to `state/conversation/exit_reason.txt`, exit 0 (conversation.sh will restart)
+11. Else: loop from step 1
 
 ---
 

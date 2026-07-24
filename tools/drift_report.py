@@ -26,7 +26,6 @@ TRACKED_FILES = [
     "tools/relationship_update.py",
     "tools/behavioral_adapter.py",
     "tools/command_dispatcher.py",
-    "tools/check_nexus.sh",
     "tools/check_replies.sh",
     "tools/telegram_send.sh",
     "tools/inbox.py",
