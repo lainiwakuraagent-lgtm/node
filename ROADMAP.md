@@ -25,7 +25,7 @@ Cleanup and documentation sprint before the repo goes public.
 - [x] Remove tracked instance-specific files
 - [x] Patch `.gitignore` for runtime state
 - [x] Remove hardcoded paths — make scripts location-relative
-- [x] Remove Nexus entirely — Loom is the required dependency
+- [ ] Remove Nexus entirely — Loom is the required dependency (reopened 2026-07-24, see note below)
 - [x] Rewrite README
 - [x] Update and extend architecture diagrams (`.claude/architecture/`)
 - [ ] Audit `check_character.sh` and `consolidate_session.sh`
@@ -45,6 +45,21 @@ file, zero log entries in `maintenance_decisions.md`). Left as-is intentionally:
 of a planned future "file dropbox" feature, not dead code. Also has a real bug (ignores its own
 `--project-dir` flag, hardcodes `/home/andrii/lain/agent_project` paths) — fix when the feature
 is actually built out.
+
+**Note on Nexus removal (reopened 2026-07-24):** the Phase 0 checklist marked this done, but only
+`tools/check_nexus.sh` was actually deleted (T270/T271 review, 2026-07-24). Live Nexus code
+remains: `scripts/interactive.sh` refreshes a Nexus JWT token every interactive session — not
+dead, runs every time — and `tools/web_server.py`, `tools/recap_generator.py`,
+`tools/drift_report.py`, `tools/inbox.py`, and `CLAUDE.md` all still reference live Nexus
+state/tokens/channels.
+
+The direction has also changed, independent of finishing the cleanup: Nexus should not be
+force-removed. It will most likely stay available for a blank_node instance, but cross-agent
+communication should be a configurable setting — Nexus is one possible implementation, not a
+mandatory or exclusive one (see Phase 2, Communication module). Re-scope this item from "remove
+Nexus" to "make cross-agent communication configurable, with Nexus as one option," and reconcile
+the still-live references above with whatever that setting ends up looking like, rather than
+finishing the original removal as originally scoped.
 
 ---
 
@@ -115,6 +130,12 @@ Telegram works but needs explicit validation across all supported flows:
   synchronization constraints. Document the evaluation result — implement if viable,
   document the blockers if not.
 - Make it straightforward to add a new channel (Matrix, Discord, custom webhook)
+- **Nexus** (cross-agent channel, distinct from owner-facing Telegram/Slack/etc.): still live in
+  parts of the codebase despite an earlier "removed entirely" checklist entry in Phase 0 that
+  turned out to be premature. Direction (2026-07-24): Nexus stays available as one configurable
+  option for cross-agent communication — not mandatory, not the only option. Define it as a
+  pluggable channel alongside whatever else gets added here, rather than an in/out decision made
+  once at the harness level.
 
 ### Multi-node topology
 - Define the topology model: what a "team" is, how nodes are identified, how they relate
@@ -227,3 +248,4 @@ migration notes with each significant version change.
 | Prompt injection | Are current mitigations sufficient for a public deployment? | Needs audit |
 | check_replies.sh | Never invoked by any prompt/script in blank_node or agent_project, despite its own docstring saying "run at start of every session" and being described as the webhook-reply reader everywhere else. Webhook-delivered replies during nightly/execution sessions are never processed. Needs wiring into wrapper_prompt.md (or a deliberate decision that it's superseded). | Flagged 2026-07-23, deferred |
 | conv_idle_check.py | Depends on `state/conversation/last_real_message_at.txt`, which nothing in either repo ever writes — the 30-min idle-close auto-shutdown has never fired. conv_watchdog.py's separate staleness/crash detection is the only thing currently guarding the conversational layer. Needs a step added to conversation.md's message loop to write the timestamp, in both repos. | Flagged 2026-07-23, deferred |
+| Nexus removal | Phase 0 marked "remove Nexus entirely" done, but live Nexus code remains in `interactive.sh` (JWT refresh, runs every session), `web_server.py`, `recap_generator.py`, `drift_report.py`, `inbox.py`, `CLAUDE.md`. Direction changed: Nexus should be a configurable cross-agent-communication option (Phase 2), not force-removed. | Reopened 2026-07-24, needs re-scoping (see Phase 0 + Phase 2 notes) |
