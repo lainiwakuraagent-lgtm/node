@@ -11,7 +11,7 @@ things worth acting on to the inbox for later execution sessions to pick up.
 **Permitted:**
 - Read and respond to Telegram messages from Andrii
 - Read `state/conversation/thread.json` (message history)
-- Read `memory/work/musubi_data/users/lain/andrii.md` (who you're talking to)
+- Read `memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md` (who you're talking to)
 - Read `memory/latest_summary.md` (last execution handoff — for awareness)
 - Read `state/reports/` tree (session reports, milestones, daily digests — for surfacing on request)
 - Write to `state/conversation/` files (thread, checkpoint, budget, last_update_id)
@@ -52,7 +52,7 @@ Let it carry actual mood. Do not use standard emoji.
 
 1. Read `state/conversation/checkpoint.json` if it exists — load summary + last messages
 2. Read `state/conversation/thread.json` — load recent history
-3. Read `memory/work/musubi_data/users/lain/andrii.md` — Trust/Warmth/Friction
+3. Read `memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md` — Trust/Warmth/Friction
 4. Check `inbox/pending.json` — note any unprocessed items for awareness (do not process them)
 5. Check `state/conversation/context_budget.json` — initialize if missing
 
@@ -189,7 +189,7 @@ The two layers share state through explicit bridges — nothing implicit:
 | `state/reports/` | execution → conversational | Session reports, milestones, digests |
 | `memory/latest_summary.md` | execution → conversational | HOT STATE: what the execution layer is doing |
 | `state/behavioral_context.txt` | shared (wake.sh writes) | Trust/Warmth/Friction calibration |
-| `memory/work/musubi_data/users/lain/andrii.md` | shared | Relationship state |
+| `memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md` | shared | Relationship state |
 
 Execution layer does NOT read Telegram. You handle all human-facing communication.
 You do NOT write to execution memory files. They handle their own state.

@@ -423,22 +423,63 @@ def load_type_config(project_dir: Path, session_type: str) -> dict:
     return config
 
 
-def assemble_context(project_dir: Path, context_files: list) -> str:
+def load_agent_identity(project_dir: Path) -> dict:
+    """
+    Read AGENT_NAME/OWNER_NAME from state/agent_config.env, falling back to
+    the same defaults wake.sh uses when the file is absent. Used to substitute
+    ${AGENT_NAME}/${OWNER_NAME} tokens in context_files paths and prompt
+    content, so a differently-named clone doesn't silently lose relationship
+    context (identity paths used to be hardcoded to lain/andrii everywhere).
+    """
+    identity = {"AGENT_NAME": "lain", "OWNER_NAME": "andrii"}
+    config_path = project_dir / "state" / "agent_config.env"
+    if not config_path.exists():
+        return identity
+    try:
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key in identity and value:
+                identity[key] = value
+    except OSError:
+        pass
+    return identity
+
+
+def _substitute_identity(text: str, identity: dict) -> str:
+    for key, value in identity.items():
+        text = text.replace("${" + key + "}", value)
+    return text
+
+
+def assemble_context(project_dir: Path, context_files: list, identity: dict = None) -> str:
     """
     Read context files and concatenate them with headers.
-    Files that don't exist are silently skipped.
+    ${AGENT_NAME}/${OWNER_NAME} tokens in a path are substituted before
+    resolution. Files that don't exist (after substitution) are skipped,
+    with a warning to stderr -- silent skipping previously made a missing
+    identity/relationship file indistinguishable from "nothing to preload."
     """
+    if identity is None:
+        identity = load_agent_identity(project_dir)
+
     parts = []
     for rel_path in context_files:
         if not isinstance(rel_path, str):
             continue
-        abs_path = project_dir / rel_path
+        resolved_rel_path = _substitute_identity(rel_path, identity)
+        abs_path = project_dir / resolved_rel_path
         if not abs_path.exists():
+            print(f"WARNING: context file not found, skipping: {resolved_rel_path}", file=sys.stderr)
             continue
         try:
             content = abs_path.read_text(encoding="utf-8").strip()
             if content:
-                parts.append(f"### {rel_path}\n\n{content}")
+                parts.append(f"### {resolved_rel_path}\n\n{content}")
         except OSError:
             continue
 
@@ -448,15 +489,18 @@ def assemble_context(project_dir: Path, context_files: list) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def load_prompt_content(project_dir: Path, prompt_file: str) -> str:
-    """Load the type-specific prompt file contents."""
+def load_prompt_content(project_dir: Path, prompt_file: str, identity: dict = None) -> str:
+    """Load the type-specific prompt file contents, substituting identity tokens."""
     if not prompt_file:
         return ""
     prompt_path = project_dir / prompt_file
     if not prompt_path.exists():
         return ""
+    if identity is None:
+        identity = load_agent_identity(project_dir)
     try:
-        return prompt_path.read_text(encoding="utf-8").strip()
+        content = prompt_path.read_text(encoding="utf-8").strip()
+        return _substitute_identity(content, identity)
     except OSError:
         return ""
 
@@ -470,17 +514,18 @@ def main():
         project_dir, args.trigger_mode, db_path
     )
     config = load_type_config(project_dir, session_type)
+    identity = load_agent_identity(project_dir)
 
     context_files = config.get("context_files") or []
     if not isinstance(context_files, list):
         context_files = []
 
-    assembled_context = assemble_context(project_dir, context_files)
+    assembled_context = assemble_context(project_dir, context_files, identity)
 
     prompt_file = config.get("prompt_file") or ""
     if not isinstance(prompt_file, str):
         prompt_file = ""
-    prompt_content = load_prompt_content(project_dir, prompt_file)
+    prompt_content = load_prompt_content(project_dir, prompt_file, identity)
 
     behavioral_overrides = config.get("behavioral_overrides") or {}
     if not isinstance(behavioral_overrides, dict):

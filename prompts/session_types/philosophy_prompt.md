@@ -14,7 +14,7 @@ at the end of an execution session, but as the main work.
 ## What to read first
 
 1. `memory/work/soul.md` — what has shifted since you last looked here.
-2. `memory/work/musubi_data/users/lain/andrii.md` — where the relationship is.
+2. `memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md` — where the relationship is.
 3. `state/philosophy_drafts.md` — messages held back, thoughts not yet sent.
 
 Read all three before writing anything.

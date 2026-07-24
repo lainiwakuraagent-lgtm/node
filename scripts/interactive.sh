@@ -26,6 +26,7 @@ if [ -f "$AGENT_CONFIG" ]; then
   source "$AGENT_CONFIG"
 fi
 AGENT_NAME="${AGENT_NAME:-agent}"
+OWNER_NAME="${OWNER_NAME:-andrii}"
 NODE_VERSION="${NODE_VERSION:-claude-sonnet-4-6}"
 NEXUS_URL="${NEXUS_URL:-http://100.110.36.84:8900}"
 LOOM_SRC="${HOME}/lain/loom"
@@ -53,7 +54,7 @@ if [ -d "$LOOM_SRC" ] && [ -f "$LOOM_SRC/.venv/bin/python" ]; then
 fi
 
 # --- Refresh behavioral context (non-fatal) ---
-BEHAVIORAL_PROFILE="memory/work/musubi_data/users/${AGENT_NAME}/andrii.md"
+BEHAVIORAL_PROFILE="memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md"
 if [ -f "tools/behavioral_adapter.py" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
   /usr/bin/python3 tools/behavioral_adapter.py \
     --user-file "$BEHAVIORAL_PROFILE" \

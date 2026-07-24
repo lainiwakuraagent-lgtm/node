@@ -21,7 +21,15 @@ PROMPT_FILE="$PROJECT_DIR/prompts/conversation.md"
 PERSONA_FILE="$PROJECT_DIR/prompts/persona.txt"
 LOCK_FILE="$STATE_DIR/conversation.lock"
 WATCHER_PID_FILE="$CONV_DIR/watcher.pid"
+
+# --- Load agent config (parameterize for new node instances) ---
+AGENT_CONFIG="$STATE_DIR/agent_config.env"
+if [ -f "$AGENT_CONFIG" ]; then
+  # shellcheck disable=SC1090
+  source "$AGENT_CONFIG"
+fi
 AGENT_NAME="${AGENT_NAME:-lain}"
+OWNER_NAME="${OWNER_NAME:-andrii}"
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "$CONV_DIR"
 
@@ -127,18 +135,22 @@ while true; do
     SESSION_OUT="$LOG_DIR/conversation_$(date +%Y-%m-%d)_${RESTART_COUNT}.out"
     SESSION_ERR="$LOG_DIR/conversation_$(date +%Y-%m-%d)_${RESTART_COUNT}.err"
 
-    # Build prompt: conversation.md + optional persona
+    # Build prompt: conversation.md + optional persona.
+    # conversation.md uses ${AGENT_NAME}/${OWNER_NAME} tokens for identity paths
+    # (same convention resolve_session_type.py substitutes for other session
+    # types) -- substitute them here since this path never goes through that
+    # resolver.
     SESSION_PROMPT=$(mktemp "$STATE_DIR/conv_prompt.XXXXXX.md")
     if [ -f "$PERSONA_FILE" ]; then
         {
-            cat "$PROMPT_FILE"
+            sed -e "s/\${AGENT_NAME}/${AGENT_NAME}/g" -e "s/\${OWNER_NAME}/${OWNER_NAME}/g" "$PROMPT_FILE"
             echo ""
             echo "---"
             echo ""
             cat "$PERSONA_FILE"
         } > "$SESSION_PROMPT"
     else
-        cp "$PROMPT_FILE" "$SESSION_PROMPT"
+        sed -e "s/\${AGENT_NAME}/${AGENT_NAME}/g" -e "s/\${OWNER_NAME}/${OWNER_NAME}/g" "$PROMPT_FILE" > "$SESSION_PROMPT"
     fi
 
     # Launch Claude Code in conversation mode.
