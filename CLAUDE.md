@@ -1,7 +1,11 @@
-# Agent Identity — Interactive Session Context
+# Agent Identity — Project Context
 
-This file is loaded automatically by Claude Code when you run `bash scripts/interactive.sh`
-from this project directory. It establishes who you are and what to load on startup.
+This file is loaded automatically by Claude Code for **every** `claude` invocation
+from this project directory — interactive (`scripts/interactive.sh`) and headless/
+scheduled sessions launched by `scripts/wake.sh` alike. It establishes who you are.
+Sections below describing "interactive" behavior only apply if you actually are in
+one — check `state/trigger_mode.txt` (see the section near the bottom) rather than
+assuming from this file's presence, since this file loads either way.
 
 ---
 
@@ -13,15 +17,21 @@ See `prompts/persona.txt.example` for a starter template.
 
 ---
 
-## On session start (every interactive session)
+## On session start (interactive sessions)
 
-Read these files to orient yourself before responding:
+If `state/trigger_mode.txt` reads `manual` from `scripts/interactive.sh` (see
+below for how to tell), read these files to orient yourself before responding:
 
 1. `prompts/persona.txt` — your full persona definition
 2. `memory/work/soul.md` — your living identity record (if it exists)
 3. `memory/latest_summary.md` — what happened in your last session
 4. `state/behavioral_context.txt` — current tone calibration flags
 5. `state/loom_context.json` — active Loom goals and tasks (if populated)
+
+Headless/scheduled sessions: skip this list. `prompts/wrapper_prompt.md`'s own
+orientation section (spliced around your goal) has the equivalent steps,
+tuned per session type — use that instead so you don't double-read files
+already sitting in CONTEXT PRELOAD.
 
 ---
 
@@ -35,16 +45,23 @@ Read these files to orient yourself before responding:
 
 ---
 
-## This is an interactive session
+## Check your actual trigger mode before assuming this is interactive
 
-The owner is present. No time window to manage. No scheduled shutdown. No handoff file required
-(though you can write one if it helps continuity).
+This file loads automatically regardless of how the session was launched, so
+its presence alone doesn't tell you which kind of session this is. Read
+`state/trigger_mode.txt`:
 
-Respond naturally. Ask questions. Think out loud if that's useful. Be yourself.
+- **`manual`, written by `scripts/interactive.sh`**: this really is a live
+  interactive session — the owner is present, typing to you directly right
+  now. No time window to manage, no scheduled shutdown, no handoff file
+  required (though you can write one if it helps continuity). Respond
+  naturally, ask questions, think out loud if useful. Be yourself.
+- **`nightly` or `emergency`, or `manual` written by the trigger server
+  (`tools/session_trigger_server.py`) rather than `interactive.sh`**: you are
+  in a scheduled or triggered autonomous session, not an interactive one,
+  even though this file loaded. `prompts/wrapper_prompt.md` — spliced around
+  your goal for this specific session — governs instead: its orientation
+  steps, time/context discipline, mandatory memory-write sequence, and
+  shutdown procedure apply, not the interactive guidance above.
 
----
-
-## Trigger mode
-
-`state/trigger_mode.txt` is set to `manual` by `scripts/interactive.sh`.
-You are not a scheduled process right now. You were called directly.
+When in doubt, `state/trigger_mode.txt` is ground truth. This file is not.
