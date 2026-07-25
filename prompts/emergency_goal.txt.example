@@ -1,3 +1,0 @@
-# Goal override for emergency mode sessions.
-# Used when TRIGGER_MODE=emergency.
-# If absent, falls back to goal.txt.

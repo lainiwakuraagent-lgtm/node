@@ -17,12 +17,20 @@ Priority order:
   4. default: "philosophy" (empty queue → identity/relationship session)
 
 Queue-state rules (priority 3, within work windows):
-  - desire-status goals not blocked          -> evaluation
-  - needs_plan-status tasks                  -> planning
-  - scheduled/in_progress tasks tagged       -> audit
-    milestone_review with all deps done
-  - scheduled tasks ready to execute         -> execution
-  - nothing actionable (empty queue)         -> philosophy
+  - desire-status goals/projects, not blocked -> evaluation
+  - needs_plan-status goals/projects/tasks    -> planning
+  - review-status goals, or scheduled/        -> audit
+    in_progress tasks tagged milestone_review
+    with all deps done
+  - scheduled tasks ready to execute          -> execution
+  - nothing actionable (empty queue)          -> philosophy
+
+  Each rule widened from task-only to also cover goals and projects sharing
+  the same status (Loom's Goal/Project/Task schema shares one status
+  vocabulary). No new tiers, no reordering — the four-rule shape is
+  unchanged. When a rule matches at multiple levels simultaneously, goal
+  beats project beats task. Rule 4 (execution) stays task-only; there's no
+  goal/project equivalent of "ready to execute."
 
 Usage:
   python3 scripts/resolve_session_type.py \\
@@ -34,6 +42,16 @@ Output JSON:
   session_type:        resolved type id
   resolution_source:   env_var | queue_state | default
   queue_state_reason:  human-readable reason when source is queue_state (or "")
+  target_level:        "goal" | "project" | "task" | null — which level the
+                        matched dispatch rule actually fired on (queue_state only)
+  target_id:            id of that specific matched record, or null
+  target_context:       full detail of the matched goal/project record, formatted
+                        for prompt injection (or "" for task-level/no match — task
+                        detail is already covered by state/loom_context.json's
+                        current_task/current_task_lineage, which reflects the
+                        *active* goal/project, not necessarily whatever this rule
+                        matched, since rules 1-3 are system-wide, not scoped to
+                        the active goal)
   prompt_content:      contents of the type's prompt_file (or "")
   assembled_context:   concatenated context_files (or "")
   focus_hint:          type's focus_hint text (or "")
@@ -49,6 +67,7 @@ import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 LOOM_DB_PATH = Path.home() / ".local" / "share" / "loom" / "loom.db"
 
@@ -71,17 +90,18 @@ def parse_args():
 
 def resolve_from_queue_state(db_path: Path) -> tuple:
     """
-    Query the Loom DB and return (session_type, reason) based on queue state.
-    Returns (None, None) if no queue-state rule matches (fall through).
+    Query the Loom DB and return (session_type, reason, target) based on queue state.
+    target is {"level": "goal"|"project"|"task", "id": <int>} or None.
+    Returns (None, None, None) if no queue-state rule matches (fall through).
     """
     if not db_path.exists():
-        return None, None
+        return None, None, None
 
     try:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
     except sqlite3.Error:
-        return None, None
+        return None, None, None
 
     try:
         result = _check_queue_state(conn)
@@ -91,25 +111,73 @@ def resolve_from_queue_state(db_path: Path) -> tuple:
 
 
 def _check_queue_state(conn: sqlite3.Connection) -> tuple:
-    """Run queue-state checks in priority order. Returns (type, reason) or (None, None)."""
+    """Run queue-state checks in priority order. Returns (type, reason, target) or (None, None, None).
 
-    # Rule 1: desire-status goals not blocked -> evaluation
+    target identifies the specific record a rule matched — needed because
+    rules 1-3 are system-wide (not scoped to whichever goal is active), so
+    the matched goal/project may not be the one state/loom_context.json's
+    active_goal/active_project already describe.
+    """
+
+    # Rule 1: desire-status goals/projects, not blocked -> evaluation (goal-first)
     try:
         rows = conn.execute(
             "SELECT id, name FROM goals "
             "WHERE status = 'desire' "
             "AND (blocked_reason IS NULL OR blocked_reason = '') "
-            "ORDER BY priority DESC "
+            "ORDER BY priority DESC, id ASC "
             "LIMIT 5"
         ).fetchall()
         if rows:
             names = ", ".join(r["name"] for r in rows[:3])
-            return "evaluation", f"{len(rows)} desire-status goal(s) need evaluation: {names}"
+            return ("evaluation", f"{len(rows)} desire-status goal(s) need evaluation: {names}",
+                    {"level": "goal", "id": rows[0]["id"]})
     except sqlite3.Error:
         pass
 
-    # Rule 2: needs_plan-status tasks with all deps done -> planning
+    try:
+        rows = conn.execute(
+            "SELECT id, name FROM projects "
+            "WHERE status = 'desire' "
+            "AND (blocked_reason IS NULL OR blocked_reason = '') "
+            "ORDER BY priority DESC, id ASC "
+            "LIMIT 5"
+        ).fetchall()
+        if rows:
+            names = ", ".join(r["name"] for r in rows[:3])
+            return ("evaluation", f"{len(rows)} desire-status project(s) need evaluation: {names}",
+                    {"level": "project", "id": rows[0]["id"]})
+    except sqlite3.Error:
+        pass
+
+    # Rule 2: needs_plan-status goals/projects/tasks -> planning (goal-first, then project, then task)
+    try:
+        rows = conn.execute(
+            "SELECT id, name FROM goals WHERE status = 'needs_plan' "
+            "ORDER BY priority DESC, id ASC LIMIT 5"
+        ).fetchall()
+        if rows:
+            names = ", ".join(r["name"] for r in rows[:3])
+            return ("planning", f"{len(rows)} needs_plan-status goal(s) need planning: {names}",
+                    {"level": "goal", "id": rows[0]["id"]})
+    except sqlite3.Error:
+        pass
+
+    try:
+        rows = conn.execute(
+            "SELECT id, name FROM projects WHERE status = 'needs_plan' "
+            "ORDER BY priority DESC, id ASC LIMIT 5"
+        ).fetchall()
+        if rows:
+            names = ", ".join(r["name"] for r in rows[:3])
+            return ("planning", f"{len(rows)} needs_plan-status project(s) need planning: {names}",
+                    {"level": "project", "id": rows[0]["id"]})
+    except sqlite3.Error:
+        pass
+
+    # needs_plan-status tasks with all deps done -> planning.
     # Tasks with unmet deps cannot be planned yet — skip them to avoid wasted planning sessions.
+    # (Goals/projects have no `depends` field, so this gating is task-only.)
     try:
         rows = conn.execute(
             "SELECT id, name, depends FROM tasks "
@@ -140,11 +208,25 @@ def _check_queue_state(conn: sqlite3.Connection) -> tuple:
             actionable.append(row)
         if actionable:
             names = ", ".join(r["name"] for r in actionable[:3])
-            return "planning", f"{len(actionable)} task(s) need planning: {names}"
+            return ("planning", f"{len(actionable)} task(s) need planning: {names}",
+                    {"level": "task", "id": actionable[0]["id"]})
     except sqlite3.Error:
         pass
 
-    # Rule 3: scheduled/in_progress tasks tagged milestone_review with all deps done -> audit
+    # Rule 3: review-status goals -> audit (goal-level, checked before task milestone_review)
+    try:
+        rows = conn.execute(
+            "SELECT id, name FROM goals WHERE status = 'review' "
+            "ORDER BY priority DESC, id ASC LIMIT 5"
+        ).fetchall()
+        if rows:
+            names = ", ".join(r["name"] for r in rows[:3])
+            return ("audit", f"{len(rows)} review-status goal(s) ready for audit: {names}",
+                    {"level": "goal", "id": rows[0]["id"]})
+    except sqlite3.Error:
+        pass
+
+    # scheduled/in_progress tasks tagged milestone_review with all deps done -> audit
     try:
         rows = conn.execute(
             "SELECT id, name, depends FROM tasks "
@@ -173,30 +255,56 @@ def _check_queue_state(conn: sqlite3.Connection) -> tuple:
 
         if audit_candidates:
             names = ", ".join(r["name"] for r in audit_candidates[:3])
-            return "audit", f"{len(audit_candidates)} milestone_review task(s) ready for audit: {names}"
+            return ("audit", f"{len(audit_candidates)} milestone_review task(s) ready for audit: {names}",
+                    {"level": "task", "id": audit_candidates[0]["id"]})
     except sqlite3.Error:
         pass
 
-    # Rule 4: scheduled tasks ready to execute (not blocked, wait_until not in future) -> execution
+    # Rule 4: scheduled tasks ready to execute (not blocked, wait_until not in future,
+    # all deps done) -> execution. Fetch candidates in SQL, dep-check in Python to
+    # handle both JSON-array ("depends":"[273,274]") and comma-separated ("depends":"273,274")
+    # formats without relying on json_each() SQL extension.
     try:
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        rows = conn.execute(
-            "SELECT id, name FROM tasks "
+        candidates = conn.execute(
+            "SELECT id, name, depends FROM tasks "
             "WHERE status = 'scheduled' "
             "AND (blocked_reason IS NULL OR blocked_reason = '') "
             "AND (wait_until IS NULL OR wait_until <= ?) "
-            "ORDER BY urgency_score DESC, priority ASC "
-            "LIMIT 5",
+            "ORDER BY urgency_score DESC "
+            "LIMIT 20",
             (now_iso,)
         ).fetchall()
-        if rows:
-            names = ", ".join(r["name"] for r in rows[:3])
-            return "execution", f"{len(rows)} scheduled task(s) ready: {names}"
+        ready = []
+        for row in candidates:
+            deps_raw = row["depends"]
+            if deps_raw:
+                try:
+                    dep_ids = json.loads(deps_raw)
+                except (json.JSONDecodeError, TypeError):
+                    try:
+                        dep_ids = [int(x) for x in str(deps_raw).split(",") if x.strip()]
+                    except ValueError:
+                        dep_ids = []
+                if dep_ids:
+                    placeholders = ",".join("?" for _ in dep_ids)
+                    undone = conn.execute(
+                        f"SELECT COUNT(*) FROM tasks "
+                        f"WHERE id IN ({placeholders}) AND status != 'done'",
+                        dep_ids,
+                    ).fetchone()[0]
+                    if undone > 0:
+                        continue
+            ready.append(row)
+        if ready:
+            names = ", ".join(r["name"] for r in ready[:3])
+            return ("execution", f"{len(ready)} scheduled task(s) ready: {names}",
+                    {"level": "task", "id": ready[0]["id"]})
     except sqlite3.Error:
         pass
 
     # No queue-state rule matched — fall through (empty queue → philosophy)
-    return None, None
+    return None, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -205,28 +313,29 @@ def _check_queue_state(conn: sqlite3.Connection) -> tuple:
 
 def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
     """
-    Returns (session_type: str, resolution_source: str, queue_state_reason: str).
+    Returns (session_type, resolution_source, queue_state_reason, target).
+    target is {"level": "goal"|"project"|"task", "id": <int>} or None.
     """
 
     # Priority 1: SESSION_TYPE env var (explicit override — always wins)
     env_type = os.environ.get("SESSION_TYPE", "").strip()
     if env_type:
-        return env_type, "env_var", ""
+        return env_type, "env_var", "", None
 
     # Priority 2: WINDOW_TYPE env var (lane constraint from wake.sh)
     window_type = os.environ.get("WINDOW_TYPE", "").strip().lower()
     if window_type == "maintenance":
-        return "maintenance", "window_type", ""
+        return "maintenance", "window_type", "", None
     if window_type == "reflection":
         # Reflection windows can also pick philosophy
         reflection_type = _pick_reflection_type(project_dir)
-        return reflection_type, "window_type", ""
+        return reflection_type, "window_type", "", None
     # window_type == "work" or unset: fall through to queue-state logic
 
     # Priority 3: Queue state from Loom DB
-    queue_type, queue_reason = resolve_from_queue_state(db_path)
+    queue_type, queue_reason, target = resolve_from_queue_state(db_path)
     if queue_type:
-        return queue_type, "queue_state", queue_reason
+        return queue_type, "queue_state", queue_reason, target
 
     # Priority 3b: Inbox has unprocessed task_requests/bug_reports/task_comments → execution needed
     # This handles the case where inbox.py startup hasn't run yet (it runs inside the
@@ -234,18 +343,57 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
     # execution so inbox.py startup can convert entries to Loom tasks and work them.
     if _inbox_has_pending_tasks(project_dir):
         return "execution", "inbox_pending", \
-            "inbox/pending.json has unprocessed task_request/bug_report/task_comment entries"
+            "inbox/pending.json has unprocessed task_request/bug_report/task_comment entries", None
 
-    # Priority 4: default — empty queue means philosophy session.
-    # Select sub-mode based on consecutive philosophy session count.
+    # Priority 4: default — nothing eligible anywhere (no goal, project, or task
+    # matched any rule above) means philosophy session. Select sub-mode based on
+    # consecutive philosophy session count.
+    #
+    # If a default goal is configured for this node (DEFAULT_GOAL_ID in
+    # state/agent_config.env), attach it as target so main()'s existing
+    # target_context machinery (built for rules 1-3) picks it up for free and
+    # injects its content as framing — no new session type, no new injection
+    # path. Looked up by id directly, not gated by status: the default goal is
+    # a carve-out from the normal Goal status table (never evaluated, planned,
+    # or audited), so it must resolve here even if its status is desire or
+    # anything else. philosophy_cap aborts before consuming target_context
+    # anyway, so attaching it there too is harmless.
+    default_goal_id = _read_default_goal_id(project_dir)
+    target = {"level": "goal", "id": default_goal_id} if default_goal_id else None
+
     consec = _read_consecutive_philosophy_count(project_dir)
     if consec >= 3:
-        return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached"
+        return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached", target
     if consec == 2:
-        return "philosophy_blocker", "default", f"consecutive_philosophy_count={consec}, blocker review mode"
+        return "philosophy_blocker", "default", f"consecutive_philosophy_count={consec}, blocker review mode", target
     if consec == 1:
-        return "philosophy_creative", "default", f"consecutive_philosophy_count={consec}, creative mode"
-    return "philosophy", "default", ""
+        return "philosophy_creative", "default", f"consecutive_philosophy_count={consec}, creative mode", target
+    return "philosophy", "default", "", target
+
+
+def _read_default_goal_id(project_dir: Path) -> Optional[int]:
+    """Read DEFAULT_GOAL_ID from state/agent_config.env. None if unset/unreadable.
+
+    This is the per-node fallback goal invoked only when nothing else is
+    eligible (no goal/project/task matched any dispatch rule) — the Loom-native
+    replacement for the old default_goal.txt file. Content and identity of
+    that goal is a per-node decision, not something this script decides.
+    """
+    config_path = project_dir / "state" / "agent_config.env"
+    if not config_path.exists():
+        return None
+    try:
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() == "DEFAULT_GOAL_ID":
+                value = value.strip().strip('"').strip("'")
+                return int(value) if value else None
+    except (OSError, ValueError):
+        return None
+    return None
 
 
 def _read_consecutive_philosophy_count(project_dir: Path) -> int:
@@ -388,8 +536,12 @@ def load_yaml_simple(path: Path) -> dict:
         return {}
 
 
-def load_type_config(project_dir: Path, session_type: str) -> dict:
-    """Load and return the session type YAML config dict."""
+def load_type_config(project_dir: Path, session_type: str, target: Optional[dict] = None) -> dict:
+    """Load and return the session type YAML config dict.
+
+    target ({"level": ..., "id": ...}, from resolve_type()) selects which
+    scope variant to merge in, where applicable.
+    """
     type_file = project_dir / "config" / "session_types" / f"{session_type}.yaml"
     if not type_file.exists():
         return {}
@@ -420,7 +572,58 @@ def load_type_config(project_dir: Path, session_type: str) -> dict:
         except OSError:
             pass
 
+    # Planning has goal-scoped ("decompose into projects") and project-scoped
+    # (≈ the original planning content) variants, selected by which level
+    # resolve_type()'s dispatch rule actually matched — a direct selection,
+    # not a rotation. Falls back to plain planning.yaml when target is
+    # task-level or unset, matching planning's original behavior.
+    if session_type == "planning" and target and target.get("level") in ("goal", "project"):
+        scope_file = project_dir / "config" / "session_types" / f"planning_{target['level']}_scope.yaml"
+        scope_config = load_yaml_simple(scope_file)
+        if scope_config:
+            config["context_files"] = scope_config.get("context_files", config.get("context_files", []))
+            config["focus_hint"] = scope_config.get("focus_hint", config.get("focus_hint", ""))
+            if scope_config.get("prompt_file"):
+                config["prompt_file"] = scope_config["prompt_file"]
+
     return config
+
+
+def _fetch_target_context(db_path: Path, target: Optional[dict]) -> str:
+    """Fetch and format the full detail of whatever record resolve_type()'s dispatch
+    rule actually matched (a goal or project awaiting evaluation/planning/audit).
+
+    Task-level matches (and no match) return "" — task detail is already
+    covered by state/loom_context.json's current_task/current_task_lineage,
+    which loom's context.py resolves separately. That reflects the *active*
+    goal/project; this function exists because rules 1-3 are system-wide, not
+    scoped to the active goal, so the matched record may be a different one.
+    """
+    if not target or target.get("level") not in ("goal", "project"):
+        return ""
+    if not db_path.exists():
+        return ""
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+    except sqlite3.Error:
+        return ""
+    try:
+        table = "goals" if target["level"] == "goal" else "projects"
+        row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (target["id"],)).fetchone()
+    except sqlite3.Error:
+        return ""
+    finally:
+        conn.close()
+    if row is None:
+        return ""
+    d = dict(row)
+    lines = [f"{target['level'].capitalize()} {d.get('id')}: {d.get('name')}"]
+    for key in ("status", "priority", "description", "blocked_reason", "blocked_note"):
+        val = d.get(key)
+        if val:
+            lines.append(f"  {key}: {val}")
+    return "\n".join(lines)
 
 
 def load_agent_identity(project_dir: Path) -> dict:
@@ -510,10 +713,10 @@ def main():
     project_dir = Path(args.project_dir).resolve()
     db_path = Path(args.loom_db) if args.loom_db else LOOM_DB_PATH
 
-    session_type, resolution_source, queue_reason = resolve_type(
+    session_type, resolution_source, queue_reason, target = resolve_type(
         project_dir, args.trigger_mode, db_path
     )
-    config = load_type_config(project_dir, session_type)
+    config = load_type_config(project_dir, session_type, target)
     identity = load_agent_identity(project_dir)
 
     context_files = config.get("context_files") or []
@@ -521,6 +724,7 @@ def main():
         context_files = []
 
     assembled_context = assemble_context(project_dir, context_files, identity)
+    target_context = _fetch_target_context(db_path, target)
 
     prompt_file = config.get("prompt_file") or ""
     if not isinstance(prompt_file, str):
@@ -535,6 +739,9 @@ def main():
         "session_type": session_type,
         "resolution_source": resolution_source,
         "queue_state_reason": queue_reason,
+        "target_level": target.get("level") if target else None,
+        "target_id": target.get("id") if target else None,
+        "target_context": target_context,
         "prompt_content": prompt_content,
         "assembled_context": assembled_context,
         "focus_hint": (config.get("focus_hint") or "").strip(),
@@ -551,13 +758,14 @@ def main():
 
     # Print summary to stderr for wake.log capture
     scope_suffix = f" scope={result['scope_id']}({result['scope_name']})" if result.get("scope_id") else ""
+    target_suffix = f" target={target['level']}:{target['id']}" if target else ""
     print(
         f"session_type={session_type} source={resolution_source} "
         f"queue_reason={queue_reason!r} "
         f"prompt={'yes' if prompt_content else 'no'} "
         f"context_files={len(context_files)} "
         f"memory_discipline={result['memory_discipline']}"
-        f"{scope_suffix}",
+        f"{scope_suffix}{target_suffix}",
         file=sys.stderr,
     )
 
