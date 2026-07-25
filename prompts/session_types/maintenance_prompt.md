@@ -60,6 +60,11 @@ Check context after every major section. When you hit 50%, stop and write memory
    - If coverage is <80%: run `python3 tools/session_embed.py --limit 10` to catch up.
    - Non-fatal — skip if Ollama unreachable (check_ollama exits 0 automatically).
 
+8. **Codebase narrative refresh** (if Ollama is available):
+   - Run: `python3 tools/codebase_narrative.py` to check/regenerate the narrative section.
+   - Use `--force` to regenerate an existing narrative (e.g., after significant codebase changes).
+   - Non-fatal — exits 0 silently if Ollama unreachable.
+
 ## What NOT to do
 
 - Do not edit scripts, YAML files, or implementation files.

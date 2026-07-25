@@ -359,6 +359,20 @@ else
   echo "$CURRENT_SESSION_TYPE" > "$STATE_DIR/current_session_type.txt"
 fi
 
+# --- Inject codebase brief if orchestrator has set an active project path ---
+_ACTIVE_PROJECT_PATH_FILE="$STATE_DIR/active_project_path.txt"
+if [ -f "$_ACTIVE_PROJECT_PATH_FILE" ]; then
+  _active_project_path=$(cat "$_ACTIVE_PROJECT_PATH_FILE")
+  _project_name=$(basename "$_active_project_path")
+  _brief_file="$PROJECT_DIR/memory/codebase_briefs/${_project_name}.md"
+  if [ -f "$_brief_file" ] && grep -q "## Narrative" "$_brief_file" 2>/dev/null; then
+    { echo ""; echo "---"; echo ""; echo "## Codebase Brief: $_project_name"; echo ""; cat "$_brief_file"; } >> "$GOAL_FILE"
+    log_line "Injected codebase brief for $_project_name into goal context."
+  fi
+  unset _active_project_path _project_name _brief_file
+fi
+unset _ACTIVE_PROJECT_PATH_FILE
+
 python3 "$PROJECT_DIR/scripts/splice_prompt.py" \
   "$WRAPPER_TEMPLATE" "$GOAL_FILE" "$session_prompt" "$persona_arg"
 
