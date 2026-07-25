@@ -68,3 +68,6 @@ state/voice_mode.txt
 state/trigger_mode.txt
 state/trigger_token.txt
 state/file_watch_state.json
+
+# sqlite-vec venv for vector search
+memory/work/.sqlite_vec_venv/
