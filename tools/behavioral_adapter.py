@@ -21,9 +21,10 @@ Usage:
 import sys
 import os
 import re
+import json
 import argparse
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime, timezone
 
 PROJECT_DIR = Path(__file__).parent.parent
 
@@ -126,9 +127,63 @@ def friction_guard(friction: float) -> tuple[str, str]:
         )
 
 
+# ── Argus context reader ──────────────────────────────────────────────────────
+
+ARGUS_STATE_BEHAVIORS = {
+    'working':  ('suppress unsolicited pings', 'Andrii is actively working — keep reports brief.'),
+    'gaming':   ('suppress all pings', 'Andrii is gaming — no interruption.'),
+    'idle':     ('safe to send', 'Andrii is idle — safe to send; can be thorough.'),
+    'resting':  ('suppress', 'Andrii may be sleeping — suppress; queue for next wakeup.'),
+    'social':   ('suppress', 'Andrii is on a call/video — suppress.'),
+    'learning': ('suppress; brief if urgent', 'Andrii is reading/researching — suppress non-urgent pings.'),
+    'mixed':    ('default behavior', 'Unclear state — use warmth calibration defaults.'),
+    'unknown':  ('default behavior', 'Argus unreachable — default behavior applies.'),
+}
+
+ARGUS_MAX_AGE_SECONDS = 300  # treat as stale if older than 5 minutes
+
+
+def load_argus_section() -> str:
+    """Read state/argus_context.json and return a formatted context section, or ''."""
+    argus_file = PROJECT_DIR / 'state' / 'argus_context.json'
+    if not argus_file.exists():
+        return ''
+    try:
+        data = json.loads(argus_file.read_text(encoding='utf-8'))
+        fetched_raw = data.get('fetched_at', '')
+        fetched_at = datetime.fromisoformat(fetched_raw.replace('Z', '+00:00'))
+        age_seconds = (datetime.now(timezone.utc) - fetched_at).total_seconds()
+        if age_seconds > ARGUS_MAX_AGE_SECONDS:
+            return ''  # stale snapshot, don't inject misleading data
+        if not data.get('reachable', False):
+            return ''  # unreachable = no change to defaults
+        argus_state = data.get('state', 'unknown')
+        confidence = data.get('confidence', 0.0)
+        focus = data.get('focus_vector') or ''
+        idle_s = data.get('idle_seconds')
+        behavior, interpretation = ARGUS_STATE_BEHAVIORS.get(
+            argus_state, ARGUS_STATE_BEHAVIORS['unknown']
+        )
+        lines = [
+            '',
+            f'OWNER_CONTEXT: {argus_state} (confidence={confidence:.2f})',
+        ]
+        if focus:
+            lines.append(f'OWNER_FOCUS: {focus}')
+        if idle_s is not None:
+            lines.append(f'OWNER_IDLE: {idle_s}s')
+        lines += [
+            f'  Behavior: {behavior}',
+            f'  {interpretation}',
+        ]
+        return '\n'.join(lines)
+    except (json.JSONDecodeError, ValueError, KeyError, OSError):
+        return ''
+
+
 # ── Context file generator ────────────────────────────────────────────────────
 
-def generate_context(state: dict, source_name: str = "profile.md") -> str:
+def generate_context(state: dict) -> str:
     """Produce the behavioral context text block."""
     trust    = state['trust']    if state['trust']    is not None else 0.50
     warmth   = state['warmth']   if state['warmth']   is not None else 0.30
@@ -142,7 +197,7 @@ def generate_context(state: dict, source_name: str = "profile.md") -> str:
 
     lines = [
         f'# Behavioral Context — generated {today}',
-        f'# Source: {source_name}  |  Trust={trust:.2f}  Warmth={warmth:.2f}  Friction={friction:.2f}',
+        f'# Source: andrii.md  |  Trust={trust:.2f}  Warmth={warmth:.2f}  Friction={friction:.2f}',
         '',
         f'DISCLOSURE_LEVEL: {d_level}',
         f'  {d_guide}',
@@ -157,6 +212,9 @@ def generate_context(state: dict, source_name: str = "profile.md") -> str:
         '# Let them inform how openly you speak, how warm you sound,',
         '# and how carefully you tread. They are a current reading, not a constraint.',
     ]
+    argus_section = load_argus_section()
+    if argus_section:
+        lines.append(argus_section)
     return '\n'.join(lines) + '\n'
 
 
@@ -189,7 +247,7 @@ def main():
         print('ERROR: could not parse Trust value from profile', file=sys.stderr)
         sys.exit(1)
 
-    context = generate_context(state, source_name=user_path.name)
+    context = generate_context(state)
 
     if args.dry_run:
         print(context)

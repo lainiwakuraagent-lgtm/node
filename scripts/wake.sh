@@ -6,7 +6,13 @@
 #   emergency           — emergency/daytime mode, window gates bypassed
 #   manual              — owner-initiated trigger, window gates bypassed
 #
-# Usage: wake.sh <goal_file> [persona_file]
+# Usage: wake.sh [persona_file]
+#
+# The goal is no longer a static file — Loom is the sole goal/project source.
+# The active goal/project (see loom's GoalService.resolve_active()) is
+# resolved from the Loom DB early in this script and used to build the
+# session's base goal text dynamically. This replaces the old
+# goal.txt / emergency_goal.txt / default_goal.txt files entirely.
 
 set -euo pipefail
 
@@ -28,8 +34,7 @@ OWNER_NAME="${OWNER_NAME:-andrii}"
 AGENT_REPO="${AGENT_REPO:-lainiwakuraagent-lgtm/node}"
 NODE_VERSION="${NODE_VERSION:-claude-sonnet-4-6}"
 
-GOAL_FILE="${1:?Usage: wake.sh <goal_file> [persona_file]}"
-PERSONA_FILE="${2:-}"
+PERSONA_FILE="${1:-}"
 
 mkdir -p "$STATE_DIR" "$LOG_DIR"
 
@@ -188,22 +193,80 @@ unset _stale_pattern _stale_count
 
 # --- All gates passed: launch the agent ---
 new_count=$((current_count + 1))
-log_line "LAUNCHING session #$new_count (mode=$TRIGGER_MODE, night=$night_id). Goal file: $GOAL_FILE"
+log_line "LAUNCHING session #$new_count (mode=$TRIGGER_MODE, night=$night_id)."
 
 # Build prompt by splicing goal (and optional persona) into the wrapper template.
 session_prompt=$(mktemp "$STATE_DIR/session_prompt.XXXXXX.md")
 
-# If goal.txt has "GOAL_STATUS: complete" on line 1, fall back to default_goal.txt.
-GOAL_STATUS=$(awk 'NR==1 && /GOAL_STATUS:/ {print $2; exit}' "$GOAL_FILE")
-if [ "$GOAL_STATUS" = "complete" ]; then
-  DEFAULT_GOAL="$PROJECT_DIR/prompts/default_goal.txt"
-  if [ -f "$DEFAULT_GOAL" ]; then
-    log_line "Goal marked complete. Using default_goal.txt for this session."
-    GOAL_FILE="$DEFAULT_GOAL"
+# --- Resolve active goal/project from Loom and generate the context snapshot ---
+# Moved up (was previously generated after prompt assembly): the dynamic goal
+# text built below depends on this snapshot existing first. Single source of
+# truth for active-goal resolution (priority DESC, id ASC among
+# scheduled/in_progress) — was previously a local duplicated SQL query here,
+# and a second, broken copy in interactive.sh (`status='active'`, a value
+# that can never be set).
+LOOM_CONTEXT_FILE="$STATE_DIR/loom_context.json"
+LOOM_SRC="${HOME}/lain/loom"
+LOOM_DB="${HOME}/.local/share/loom/loom.db"
+LOOM_SESSION_ROW_ID=""
+ACTIVE_GOAL_ID=""
+if [ -d "$LOOM_SRC" ] && [ -f "$LOOM_SRC/.venv/bin/python" ]; then
+  loom_py() { PYTHONPATH="$LOOM_SRC" "$LOOM_SRC/.venv/bin/python" -m loom.cli --db "$LOOM_DB" "$@"; }
+
+  ACTIVE_GOAL_ID=$(loom_py goal resolve-active 2>/dev/null || echo "")
+  GOAL_ARG=""
+  if [ -n "$ACTIVE_GOAL_ID" ]; then
+    GOAL_ARG="--goal $ACTIVE_GOAL_ID"
+    log_line "LOOM active goal detected: ID=$ACTIVE_GOAL_ID"
+  fi
+
+  loom_py context $GOAL_ARG --output "$LOOM_CONTEXT_FILE" > /dev/null 2>&1 \
+    && log_line "LOOM context snapshot written to $LOOM_CONTEXT_FILE" \
+    || log_line "WARNING: loom context snapshot failed (non-fatal)."
+
+  # Record session start in loom_sessions table.
+  LOOM_SESSION_ROW_ID=$(loom_py session start \
+    --date "$night_id" --number "$new_count" \
+    --type "$TRIGGER_MODE" ${ACTIVE_GOAL_ID:+--goal "$ACTIVE_GOAL_ID"} 2>/dev/null || echo "")
+  if [ -n "$LOOM_SESSION_ROW_ID" ]; then
+    log_line "LOOM session row created: id=$LOOM_SESSION_ROW_ID"
+    # Write row ID to state file so the agent can update handoff note during shutdown.
+    echo "$LOOM_SESSION_ROW_ID" > "$STATE_DIR/current_loom_session_id.txt"
   else
-    log_line "WARNING: goal marked complete but default_goal.txt not found. Using original goal file."
+    log_line "WARNING: loom session start failed (non-fatal)."
+    rm -f "$STATE_DIR/current_loom_session_id.txt"
   fi
 fi
+
+# --- Build the dynamic goal text (replaces the old static goal.txt) ---
+# Sourced from the context snapshot just written: active goal/project name +
+# description. Empty/no active goal is not an error — the default-goal
+# fallback (resolve_session_type.py Priority 4) and philosophy framing carry
+# that case, same as an empty goal.txt used to fall through before.
+GOAL_FILE=$(mktemp "$STATE_DIR/goal_text.XXXXXX.md")
+DYNAMIC_GOAL_FILE="$GOAL_FILE"
+python3 -c "
+import json
+try:
+    d = json.load(open('$LOOM_CONTEXT_FILE'))
+except Exception:
+    d = {}
+g = d.get('active_goal')
+p = d.get('active_project')
+lines = []
+if g:
+    lines.append(f\"Active goal: {g.get('name')}\")
+    if g.get('description'):
+        lines.append(g['description'])
+else:
+    lines.append('No active goal currently set.')
+if p:
+    lines.append(f\"Active project: {p.get('name')}\")
+    if p.get('description'):
+        lines.append(p['description'])
+open('$GOAL_FILE', 'w').write('\n\n'.join(lines) + '\n')
+" 2>/dev/null || echo "No active goal currently set." > "$GOAL_FILE"
+log_line "Dynamic goal text built from Loom (active_goal_id=${ACTIVE_GOAL_ID:-none})."
 
 if [ -n "$PERSONA_FILE" ] && [ -f "$PERSONA_FILE" ]; then
   persona_arg="$PERSONA_FILE"
@@ -251,6 +314,7 @@ try:
     parts = []
     p = data.get('prompt_content', '').strip()
     c = data.get('assembled_context', '').strip()
+    t = data.get('target_context', '').strip()
     # Substitute maintenance scope placeholders if present
     if p and data.get('scope_id'):
         scope_name = data.get('scope_name', f'Scope {data[\"scope_id\"]}')
@@ -261,6 +325,12 @@ try:
         parts.append(p)
     if c:
         parts.append('## CONTEXT PRELOAD\n\n' + c)
+    if t:
+        # The specific goal/project record this session's dispatch rule matched
+        # (evaluation/planning/audit at goal or project level) — system-wide,
+        # not necessarily the same record as state/loom_context.json's active
+        # goal/project, since rules 1-3 aren't scoped to whichever goal is active.
+        parts.append('## TARGET\n\n' + t)
     parts.append(goal)
     open(sys.argv[3], 'w').write('\n\n---\n\n'.join(parts) + '\n')
 except Exception:
@@ -275,7 +345,7 @@ except Exception:
   if [ "$CURRENT_SESSION_TYPE" = "philosophy_cap" ]; then
     _consec=$(cat "$STATE_DIR/consecutive_philosophy.count" 2>/dev/null || echo "3")
     log_line "ABORT: philosophy cap reached (consecutive_philosophy.count=$_consec). Skipping session."
-    rm -f "$AUGMENTED_GOAL"
+    rm -f "$AUGMENTED_GOAL" "$DYNAMIC_GOAL_FILE"
     exit 0
   fi
 
@@ -291,42 +361,6 @@ fi
 
 python3 "$PROJECT_DIR/scripts/splice_prompt.py" \
   "$WRAPPER_TEMPLATE" "$GOAL_FILE" "$session_prompt" "$persona_arg"
-
-# --- Generate LOOM context snapshot and record session start (optional, non-fatal) ---
-LOOM_CONTEXT_FILE="$STATE_DIR/loom_context.json"
-LOOM_SRC="${HOME}/lain/loom"
-LOOM_DB="${HOME}/.local/share/loom/loom.db"
-LOOM_SESSION_ROW_ID=""
-if [ -d "$LOOM_SRC" ] && [ -f "$LOOM_SRC/.venv/bin/python" ]; then
-  loom_py() { PYTHONPATH="$LOOM_SRC" "$LOOM_SRC/.venv/bin/python" -m loom.cli --db "$LOOM_DB" "$@"; }
-
-  # Detect active goal from DB (python3 — sqlite3 CLI not available on this machine).
-  ACTIVE_GOAL_ID=$(python3 -c \
-    "import sqlite3,sys; c=sqlite3.connect('$LOOM_DB'); r=c.execute(\"SELECT id FROM goals WHERE status IN ('scheduled','in_progress') ORDER BY priority DESC LIMIT 1\").fetchone(); print(r[0] if r else '')" \
-    2>/dev/null || echo "")
-  GOAL_ARG=""
-  if [ -n "$ACTIVE_GOAL_ID" ]; then
-    GOAL_ARG="--goal $ACTIVE_GOAL_ID"
-    log_line "LOOM active goal detected: ID=$ACTIVE_GOAL_ID"
-  fi
-
-  loom_py context $GOAL_ARG --output "$LOOM_CONTEXT_FILE" > /dev/null 2>&1 \
-    && log_line "LOOM context snapshot written to $LOOM_CONTEXT_FILE" \
-    || log_line "WARNING: loom context snapshot failed (non-fatal)."
-
-  # Record session start in loom_sessions table.
-  LOOM_SESSION_ROW_ID=$(loom_py session start \
-    --date "$night_id" --number "$new_count" \
-    --type "$TRIGGER_MODE" ${ACTIVE_GOAL_ID:+--goal "$ACTIVE_GOAL_ID"} 2>/dev/null || echo "")
-  if [ -n "$LOOM_SESSION_ROW_ID" ]; then
-    log_line "LOOM session row created: id=$LOOM_SESSION_ROW_ID"
-    # Write row ID to state file so the agent can update handoff note during shutdown.
-    echo "$LOOM_SESSION_ROW_ID" > "$STATE_DIR/current_loom_session_id.txt"
-  else
-    log_line "WARNING: loom session start failed (non-fatal)."
-    rm -f "$STATE_DIR/current_loom_session_id.txt"
-  fi
-fi
 
 # Record count BEFORE launching — counts even if agent crashes or hangs.
 echo "$new_count" > "$COUNT_FILE"
@@ -352,6 +386,18 @@ if [ -f "$BEHAVIORAL_TOOL" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
     --output "$BEHAVIORAL_CONTEXT" > /dev/null 2>&1 \
     && log_line "Behavioral context generated: $BEHAVIORAL_CONTEXT" \
     || log_line "WARNING: behavioral_adapter.py failed (non-fatal)."
+fi
+
+# --- Poll argus for fresh owner context snapshot (non-fatal) ---
+ARGUS_POLLER="$PROJECT_DIR/tools/argus_context_poller.py"
+ARGUS_CONTEXT="$STATE_DIR/argus_context.json"
+if [ -f "$ARGUS_POLLER" ] && grep -q "^ARGUS_URL=" "$STATE_DIR/agent_config.env" 2>/dev/null; then
+  /usr/bin/python3 "$ARGUS_POLLER" > /dev/null 2>&1 || true
+  ARGUS_STATE=$(/usr/bin/python3 -c \
+    "import json; d=json.load(open('$ARGUS_CONTEXT')); print(d.get('state','unknown'))" \
+    2>/dev/null || echo "unknown")
+  export ARGUS_STATE
+  log_line "argus_state: $ARGUS_STATE"
 fi
 
 # --- Prune processed inbox entries older than 7 days (non-fatal) ---
@@ -389,6 +435,7 @@ duration_min=$(( (session_end_epoch - session_start_epoch) / 60 ))
 log_line "Session #$new_count ended. exit_code=$exit_code duration_min=$duration_min"
 rm -f "$session_prompt"
 [ -n "${AUGMENTED_GOAL:-}" ] && rm -f "$AUGMENTED_GOAL"
+rm -f "$DYNAMIC_GOAL_FILE"
 
 # --- Update consecutive philosophy counter ---
 # philosophy* types increment; any other type resets to 0.
