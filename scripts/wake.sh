@@ -41,6 +41,35 @@ mkdir -p "$STATE_DIR" "$LOG_DIR"
 timestamp() { date '+%Y-%m-%d %H:%M:%S %Z'; }
 log_line() { echo "[$(timestamp)] $*" >> "$LOG_DIR/wake.log"; }
 
+# --- Trigger result reporting (no-op unless TRIGGER_REQUEST_ID is set) ---
+# The manual-trigger HTTP endpoints (session_trigger_server.py, web_server.py)
+# launch this script fire-and-forget and have no other way to learn whether a
+# session actually started -- they'd otherwise report "triggered" the instant
+# the subprocess spawns, even if a gate below silently skips or aborts it.
+# When set, TRIGGER_REQUEST_ID is echoed back in this file so the caller can
+# match its own request to the right result (atomic write via tmp+replace,
+# same pattern as check_window.py's mark-fired).
+write_trigger_result() {
+  [ -z "${TRIGGER_REQUEST_ID:-}" ] && return 0
+  local decision="$1" reason="$2" stype="${3:-}" rpid="${4:-}"
+  python3 -c '
+import json, os, sys
+request_id, decision, reason, session_type, pid, out_path = sys.argv[1:7]
+data = {
+    "request_id": request_id,
+    "decision": decision,
+    "reason": reason,
+    "session_type": session_type or None,
+    "pid": int(pid) if pid else None,
+}
+tmp = out_path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(data, f)
+os.replace(tmp, out_path)
+' "$TRIGGER_REQUEST_ID" "$decision" "$reason" "$stype" "$rpid" \
+    "$STATE_DIR/manual_trigger_result.json" 2>/dev/null || true
+}
+
 # --- Log rotation (non-fatal) ---
 # If wake.log exceeds 1MB, rotate it before writing this session's entries.
 # Keeps the last 3 rotated files; older ones are removed automatically.
@@ -169,6 +198,7 @@ if [ -f "$LOCK_FILE" ]; then
   locked_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
   if [ -n "$locked_pid" ] && kill -0 "$locked_pid" 2>/dev/null; then
     log_line "SKIP: session already running (PID $locked_pid). Skipping this wake."
+    write_trigger_result "skipped" "session already running (PID $locked_pid)"
     exit 0
   else
     log_line "WARNING: stale lock found (PID ${locked_pid:-unknown} is dead). Removing and proceeding."
@@ -354,6 +384,7 @@ except Exception:
   if [ "$CURRENT_SESSION_TYPE" = "philosophy_cap" ]; then
     _consec=$(cat "$STATE_DIR/consecutive_philosophy.count" 2>/dev/null || echo "3")
     log_line "ABORT: philosophy cap reached (consecutive_philosophy.count=$_consec). Skipping session."
+    write_trigger_result "aborted" "philosophy cap reached (consecutive_philosophy_count=$_consec)"
     rm -f "$AUGMENTED_GOAL" "$DYNAMIC_GOAL_FILE"
     exit 0
   fi
@@ -367,6 +398,8 @@ else
   export CURRENT_SESSION_TYPE CURRENT_SESSION_TYPE_SOURCE
   echo "$CURRENT_SESSION_TYPE" > "$STATE_DIR/current_session_type.txt"
 fi
+
+write_trigger_result "launched" "" "$CURRENT_SESSION_TYPE" "$$"
 
 # --- Inject codebase brief if orchestrator has set an active project path ---
 _ACTIVE_PROJECT_PATH_FILE="$STATE_DIR/active_project_path.txt"
