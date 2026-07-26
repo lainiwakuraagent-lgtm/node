@@ -365,9 +365,9 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
     if consec >= 3:
         return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached", target
     if consec == 2:
-        return "philosophy_blocker", "default", f"consecutive_philosophy_count={consec}, blocker review mode", target
+        return "blocker_resolver", "default", f"consecutive_philosophy_count={consec}, blocker review mode", target
     if consec == 1:
-        return "philosophy_creative", "default", f"consecutive_philosophy_count={consec}, creative mode", target
+        return "creative", "default", f"consecutive_philosophy_count={consec}, creative mode", target
     return "philosophy", "default", "", target
 
 
@@ -564,6 +564,7 @@ def load_type_config(project_dir: Path, session_type: str, target: Optional[dict
         config["focus_hint"] = scope_config.get("focus_hint", config.get("focus_hint", ""))
         config["scope_id"] = scope_num
         config["scope_name"] = scope_config.get("scope_name", f"Scope {scope_num}")
+        config["scope_slug"] = scope_config.get("scope_slug", f"scope{scope_num}")
 
         # Rotate for next maintenance session
         next_idx = (idx + 1) % 3
@@ -749,6 +750,7 @@ def main():
         "memory_discipline": behavioral_overrides.get("memory_discipline", "normal"),
         "scope_id": config.get("scope_id"),
         "scope_name": config.get("scope_name"),
+        "scope_slug": config.get("scope_slug"),
         "consecutive_philosophy_count": _read_consecutive_philosophy_count(project_dir),
     }
 

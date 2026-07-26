@@ -470,7 +470,11 @@ def import_csv(conn):
 def main():
     parser = argparse.ArgumentParser(description="Write session analytics to analytics.db")
     parser.add_argument("--session-key", help="Session key (YYYY-MM-DD_N)")
-    _session_type_choices = ["execution", "planning", "maintenance", "philosophy", "free"]
+    _session_type_choices = [
+        "execution", "planning", "maintenance", "philosophy", "free",
+        "creative", "blocker_resolver",
+        "maintenance_memory", "maintenance_code", "maintenance_infra",
+    ]
     _default_session_type = os.environ.get("CURRENT_SESSION_TYPE", "")
     if not _default_session_type:
         _type_file = Path(__file__).parent.parent / "state" / "current_session_type.txt"
@@ -499,11 +503,11 @@ def main():
     parser.add_argument("--db", default=str(DB_PATH), help="DB path")
     args = parser.parse_args()
 
-    # Augment session_type with maintenance scope tag if applicable.
-    if args.session_type == "maintenance":
-        _scope = os.environ.get("MAINTENANCE_SCOPE", "").strip()
-        if _scope:
-            args.session_type = f"maintenance:scope{_scope}"
+    # Note: session_type arrives pre-qualified for maintenance (e.g.
+    # "maintenance_memory") from wake.sh's CURRENT_SESSION_TYPE -- no
+    # augmentation needed here anymore. (Formerly rewrote a bare
+    # "maintenance" to "maintenance:scope{N}" using MAINTENANCE_SCOPE;
+    # superseded now that the scope name is qualified at the source.)
 
     db_path = Path(args.db)
     db_path.parent.mkdir(parents=True, exist_ok=True)

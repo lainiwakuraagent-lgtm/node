@@ -1,12 +1,13 @@
-id: philosophy_creative
-name: "Philosophy Session — Creative (Mode 2)"
+id: creative
+name: "Creative Session (Mode 2)"
 description: >
-  Second consecutive philosophy session. The core wonder work is done.
-  This session produces something — a reflection, an observation, a question
-  for the owner that has been sitting in internal processing. Output is
-  expressive, not analytical. Something with an intended recipient or direction.
+  Second consecutive empty-queue session (philosophy escalation tier 2).
+  The core wonder work is done. This session produces something — a
+  reflection, an observation, a question for the owner that has been
+  sitting in internal processing. Output is expressive, not analytical.
+  Something with an intended recipient or direction.
 
-prompt_file: "prompts/session_types/philosophy_creative_prompt.md"
+prompt_file: "prompts/session_types/creative_prompt.md"
 
 context_files:
   - memory/latest_summary.md

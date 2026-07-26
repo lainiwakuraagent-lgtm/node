@@ -1,10 +1,10 @@
-# Philosophy Session — Creative (Mode 2)
-# Injected into the <GOAL> block when session_type=philosophy_creative
+# Creative Session (Mode 2)
+# Injected into the <GOAL> block when session_type=creative
 
-This is the second consecutive philosophy session.
+This is the second consecutive philosophy-ladder session.
 The core wonder work happened last session. This one has a different shape.
 
-## Mode: PHILOSOPHY / CREATIVE
+## Mode: CREATIVE
 
 The internal processing is done. Now produce something.
 

@@ -324,23 +324,37 @@ if [ -f "$PROJECT_DIR/scripts/resolve_session_type.py" ]; then
     --output "$SESSION_TYPE_RESULT" 2>&1) || true
   log_line "Session type resolution: ${_type_stderr:-no output}"
 
-  # Parse resolved type and resolution source; write to state and export for analytics.
+  # Parse resolved type and resolution source.
   CURRENT_SESSION_TYPE=$(python3 -c \
     "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('session_type','execution'))" \
     "$SESSION_TYPE_RESULT" 2>/dev/null || echo "execution")
   CURRENT_SESSION_TYPE_SOURCE=$(python3 -c \
     "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('resolution_source','default'))" \
     "$SESSION_TYPE_RESULT" 2>/dev/null || echo "default")
-  export CURRENT_SESSION_TYPE CURRENT_SESSION_TYPE_SOURCE
-  echo "$CURRENT_SESSION_TYPE" > "$STATE_DIR/current_session_type.txt"
-  log_line "Session type: $CURRENT_SESSION_TYPE (source: $CURRENT_SESSION_TYPE_SOURCE)"
 
-  # Export maintenance scope if present (scope_id from resolve_session_type.py result).
+  # Export maintenance scope if present (scope_id/scope_slug from resolve_session_type.py result).
   MAINTENANCE_SCOPE=$(python3 -c \
     "import json,sys; d=json.load(open(sys.argv[1])); s=d.get('scope_id'); print(s if s else '')" \
     "$SESSION_TYPE_RESULT" 2>/dev/null || echo "")
+  MAINTENANCE_SCOPE_SLUG=$(python3 -c \
+    "import json,sys; d=json.load(open(sys.argv[1])); s=d.get('scope_slug'); print(s if s else '')" \
+    "$SESSION_TYPE_RESULT" 2>/dev/null || echo "")
   export MAINTENANCE_SCOPE
-  [ -n "$MAINTENANCE_SCOPE" ] && log_line "Maintenance scope: $MAINTENANCE_SCOPE"
+
+  # Qualify maintenance's logged/reported type by scope (e.g. maintenance_memory)
+  # so session logs, session history, and analytics distinguish which of the 3
+  # rotating scopes ran -- previously every maintenance session was logged
+  # identically as "maintenance" regardless of scope. Config-file lookup above
+  # already used the base "maintenance" identity; this only affects what gets
+  # reported downstream from here.
+  if [ "$CURRENT_SESSION_TYPE" = "maintenance" ] && [ -n "$MAINTENANCE_SCOPE_SLUG" ]; then
+    CURRENT_SESSION_TYPE="maintenance_${MAINTENANCE_SCOPE_SLUG}"
+  fi
+
+  export CURRENT_SESSION_TYPE CURRENT_SESSION_TYPE_SOURCE
+  echo "$CURRENT_SESSION_TYPE" > "$STATE_DIR/current_session_type.txt"
+  log_line "Session type: $CURRENT_SESSION_TYPE (source: $CURRENT_SESSION_TYPE_SOURCE)"
+  [ -n "$MAINTENANCE_SCOPE" ] && log_line "Maintenance scope: $MAINTENANCE_SCOPE ($MAINTENANCE_SCOPE_SLUG)"
 
   # Build augmented goal: type prompt + context preload + original goal content.
   # Falls back to original goal if the augmentation step fails.
@@ -494,10 +508,11 @@ rm -f "$session_prompt"
 rm -f "$DYNAMIC_GOAL_FILE"
 
 # --- Update consecutive philosophy counter ---
-# philosophy* types increment; any other type resets to 0.
+# The three escalation-ladder types increment; any other type resets to 0.
+# philosophy_cap never reaches here -- it exits before Claude ever launches.
 _CONSEC_FILE="$STATE_DIR/consecutive_philosophy.count"
 case "${CURRENT_SESSION_TYPE:-}" in
-  philosophy*)
+  philosophy|creative|blocker_resolver)
     _prev=$(cat "$_CONSEC_FILE" 2>/dev/null || echo "0")
     _next=$(( _prev + 1 ))
     echo "$_next" > "$_CONSEC_FILE"

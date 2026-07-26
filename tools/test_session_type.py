@@ -297,8 +297,8 @@ with tempfile.TemporaryDirectory() as tmpdir:
 # Test 12: Philosophy tier escalation via consecutive_philosophy.count
 # ===========================================================================
 print("\n[12] Philosophy tier escalation")
-for count, expected in [(0, "philosophy"), (1, "philosophy_creative"),
-                         (2, "philosophy_blocker"), (3, "philosophy_cap"), (5, "philosophy_cap")]:
+for count, expected in [(0, "philosophy"), (1, "creative"),
+                         (2, "blocker_resolver"), (3, "philosophy_cap"), (5, "philosophy_cap")]:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         make_bare_project(tmp)

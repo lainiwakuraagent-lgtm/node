@@ -15,7 +15,7 @@
       "enabled": true,
       "start": "03:40",
       "end": "04:55",
-      "triggers": ["03:40"]
+      "triggers": ["03:40", "04:05", "04:30"]
     },
     {
       "label": "nightly-reflection",

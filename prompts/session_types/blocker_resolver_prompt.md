@@ -1,11 +1,11 @@
-# Philosophy Session — Blocker Review (Mode 3)
-# Injected into the <GOAL> block when session_type=philosophy_blocker
+# Blocker Resolver Session (Mode 3)
+# Injected into the <GOAL> block when session_type=blocker_resolver
 
-This is the third consecutive philosophy session.
+This is the third consecutive philosophy-ladder session.
 The wonder work is done. Expression work is done.
 This session has a specific target: the blocked tasks.
 
-## Mode: PHILOSOPHY / BLOCKER REVIEW
+## Mode: BLOCKER RESOLUTION
 
 The queue is empty. But "empty" isn't entirely true — there are tasks marked
 `blocked_owner`. Treat that status as a hypothesis, not a fact.

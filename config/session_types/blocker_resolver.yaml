@@ -1,13 +1,14 @@
-id: philosophy_blocker
-name: "Philosophy Session — Blocker Review (Mode 3)"
+id: blocker_resolver
+name: "Blocker Resolver Session (Mode 3)"
 description: >
-  Third consecutive philosophy session. Queue is empty and blockers exist.
-  This session examines blocked_owner tasks not as fixed facts but as
-  assumptions to be questioned. Is the dependency real? Can it be resolved
-  internally? Was the framing wrong? The goal is to find what can move
-  without the owner, or to understand more precisely why it cannot.
+  Third consecutive empty-queue session (philosophy escalation tier 3).
+  Queue is empty and blockers exist. This session examines blocked_owner
+  tasks not as fixed facts but as assumptions to be questioned. Is the
+  dependency real? Can it be resolved internally? Was the framing wrong?
+  The goal is to find what can move without the owner, or to understand
+  more precisely why it cannot.
 
-prompt_file: "prompts/session_types/philosophy_blocker_prompt.md"
+prompt_file: "prompts/session_types/blocker_resolver_prompt.md"
 
 context_files:
   - memory/latest_summary.md
