@@ -45,6 +45,8 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -71,6 +73,9 @@ SCHEDULE_FILE = STATE_DIR / "schedule.json"
 CONFIGS_DIR = PROJECT_DIR / "config"
 SESSION_TYPES_DIR = CONFIGS_DIR / "session_types"
 NIGHTLY_SCHEDULE_FILE = CONFIGS_DIR / "session_schedule.json"
+MANUAL_TRIGGER_RESULT_FILE = STATE_DIR / "manual_trigger_result.json"
+TRIGGER_CONFIRM_TIMEOUT_SEC = 8
+TRIGGER_CONFIRM_POLL_SEC = 0.25
 
 # ---------------------------------------------------------------------------
 # Helpers — state / config
@@ -790,24 +795,102 @@ def _save_nightly_schedule(data: dict) -> dict:
 # API — actions
 # ---------------------------------------------------------------------------
 
-def _trigger_manual(session_type: str = "") -> dict:
+def _valid_session_types() -> set:
+    """Session type ids that are directly selectable via SESSION_TYPE.
+
+    Only files with a top-level `id:` field count -- the maintenance_scope*
+    and planning_*_scope files are override fragments merged in by
+    resolve_session_type.py's load_type_config(), not standalone types, and
+    have no prompt_file/behavioral_overrides of their own to launch with.
+    """
+    if not SESSION_TYPES_DIR.exists():
+        return set()
+    valid = set()
+    for f in SESSION_TYPES_DIR.glob("*.yaml"):
+        try:
+            if any(line.strip().startswith("id:") for line in f.read_text().splitlines()):
+                valid.add(f.stem)
+        except OSError:
+            continue
+    return valid
+
+
+def _wait_for_trigger_result(request_id: str, timeout: float = TRIGGER_CONFIRM_TIMEOUT_SEC) -> Optional[dict]:
+    """Poll MANUAL_TRIGGER_RESULT_FILE for wake.sh's gate decision on this request.
+
+    wake.sh writes this file (keyed by request_id) as soon as it knows whether
+    a session actually launched -- well before the Claude session itself
+    finishes. Without this, "launched": True here would only ever mean "a
+    subprocess was started," true even when a gate silently skips or aborts
+    the launch a moment later.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if MANUAL_TRIGGER_RESULT_FILE.exists():
+            try:
+                data = json.loads(MANUAL_TRIGGER_RESULT_FILE.read_text())
+                if data.get("request_id") == request_id:
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass
+        time.sleep(TRIGGER_CONFIRM_POLL_SEC)
+    return None
+
+
+def _trigger_manual(session_type: str = "") -> JSONResponse:
     wake_sh = SCRIPTS_DIR / "wake.sh"
     if not wake_sh.exists():
         raise HTTPException(status_code=500, detail="wake.sh not found")
+
+    if session_type:
+        valid_types = _valid_session_types()
+        if session_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown session_type '{session_type}' -- valid: {sorted(valid_types)}",
+            )
+
+    request_id = str(uuid.uuid4())
+    extra_env: dict = {"TRIGGER_MODE": "manual", "TRIGGER_REQUEST_ID": request_id}
+    if session_type:
+        extra_env["SESSION_TYPE"] = session_type
+
     try:
-        extra_env: dict = {"TRIGGER_MODE": "manual"}
-        if session_type:
-            extra_env["SESSION_TYPE"] = session_type
-        proc = subprocess.Popen(
+        subprocess.Popen(
             ["bash", str(wake_sh)],
             env={**os.environ, **extra_env},
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        return {"launched": True, "pid": proc.pid, "session_type": session_type or "auto"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    result = _wait_for_trigger_result(request_id)
+    if result is None:
+        return JSONResponse(status_code=202, content={
+            "ok": False,
+            "started": "unknown",
+            "reason": f"no confirmation from wake.sh within {TRIGGER_CONFIRM_TIMEOUT_SEC}s "
+                      "-- it may still be starting, or may have already finished its gates",
+        })
+
+    decision = result.get("decision")
+    if decision == "launched":
+        return JSONResponse(status_code=200, content={
+            "ok": True,
+            "started": True,
+            "session_type": result.get("session_type"),
+            "pid": result.get("pid"),
+        })
+    if decision == "skipped":
+        return JSONResponse(status_code=409, content={
+            "ok": False, "started": False, "reason": result.get("reason"),
+        })
+    # decision == "aborted" (e.g. philosophy_cap), or any unrecognized value
+    return JSONResponse(status_code=200, content={
+        "ok": False, "started": False, "reason": result.get("reason"),
+    })
 
 
 def _emergency_enable() -> dict:
@@ -1019,11 +1102,18 @@ async def save_schedule(request: Request):
 
 @app.post("/api/trigger/manual")
 async def trigger_manual(request: Request):
-    try:
-        body = await request.json()
+    # Empty body -- no override requested, same as today. A non-empty body
+    # that isn't valid JSON is a client error, not silently "no override";
+    # previously any parse failure (including a genuine typo/bug in the
+    # caller) was swallowed and treated identically to "nothing sent."
+    raw = await request.body()
+    session_type = ""
+    if raw.strip():
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="invalid JSON body")
         session_type = str(body.get("session_type", "")).strip()
-    except Exception:
-        session_type = ""
     return _trigger_manual(session_type)
 
 
@@ -1083,7 +1173,7 @@ def main():
     parser.add_argument("--project-dir", default=None, help="Override project root (default: auto-detected from script location)")
     args = parser.parse_args()
 
-    global _ui_file, PROJECT_DIR, STATE_DIR, LOGS_DIR, TOOLS_DIR, MEMORY_DIR, SCRIPTS_DIR, ANALYTICS_DB, SESSION_LOG_CSV, SCHEDULE_FILE, CONFIGS_DIR, SESSION_TYPES_DIR, NIGHTLY_SCHEDULE_FILE
+    global _ui_file, PROJECT_DIR, STATE_DIR, LOGS_DIR, TOOLS_DIR, MEMORY_DIR, SCRIPTS_DIR, ANALYTICS_DB, SESSION_LOG_CSV, SCHEDULE_FILE, CONFIGS_DIR, SESSION_TYPES_DIR, NIGHTLY_SCHEDULE_FILE, MANUAL_TRIGGER_RESULT_FILE
     _ui_file = args.ui_file
     if args.project_dir:
         PROJECT_DIR = pathlib.Path(args.project_dir).resolve()
@@ -1098,6 +1188,7 @@ def main():
         CONFIGS_DIR = PROJECT_DIR / "config"
         SESSION_TYPES_DIR = CONFIGS_DIR / "session_types"
         NIGHTLY_SCHEDULE_FILE = CONFIGS_DIR / "session_schedule.json"
+        MANUAL_TRIGGER_RESULT_FILE = STATE_DIR / "manual_trigger_result.json"
 
     print(f"[web_server] Starting on http://{args.host}:{args.port}")
     print(f"[web_server] Project: {PROJECT_DIR}")
