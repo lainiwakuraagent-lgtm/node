@@ -94,8 +94,7 @@ IGNORE_PATTERNS = [
     # Routine wake infrastructure (not significant events)
     r'WARNING: could not check usage limits',
     r'LOOM context snapshot written',
-    r'Goal marked complete\. Using default_goal\.txt',
-    r'using.*goal\.txt|goal\.txt.*for this session',
+    r'Dynamic goal text built from Loom',
     r'pre-incrementing session counter',
     r'wake\.sh.*starting|starting.*wake\.sh',
     r'Checking session count|session count.*ok',

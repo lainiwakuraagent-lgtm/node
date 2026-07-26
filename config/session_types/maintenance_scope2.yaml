@@ -11,7 +11,10 @@ context_files:
 
 focus_hint: >
   Code & Architecture maintenance. Run tools/drift_report.py to surface blank_node divergence.
-  Audit prompts/wrapper_prompt.md accuracy and goal.txt vs Loom active goal.
+  Audit prompts/wrapper_prompt.md accuracy. Goal is now Loom-only (no goal.txt) --
+  verify wake.sh's dynamic goal text actually matches Loom's resolved active goal,
+  and that DEFAULT_GOAL_ID in state/agent_config.env, if set, still points at a
+  real goal.
   Check config/session_types/*.yaml for stale context_files references.
   Run scripts/tag_skill_lookup.py --validate-all to catch broken SOP resolution.
   Scan for any miniconda3 path references in scripts (known landmine).

@@ -21,7 +21,7 @@ A **node** is a single autonomous agent instance. It contains:
 What this is NOT:
 - Memory files (instance-specific — generated at runtime)
 - Identity/credentials (yours to fill in)
-- Goal and persona (yours to define)
+- Persona (yours to define); the goal is defined in Loom, not a file
 
 ---
 
@@ -37,16 +37,23 @@ cp identity/credentials.md.example identity/credentials.md
 # Edit with GitHub PAT, Telegram token, etc.
 
 # 3. Define the agent
-cp prompts/goal.txt.example prompts/goal.txt
 cp prompts/persona.txt.example prompts/persona.txt
-cp prompts/default_goal.txt.example prompts/default_goal.txt
-# Edit goal.txt and persona.txt for your agent. default_goal.txt is what
-# wake.sh falls back to if goal.txt is ever marked "GOAL_STATUS: complete"
-# with nothing queued to replace it -- the template default is usually fine.
+# Edit persona.txt for your agent. The goal is no longer a file -- Loom is
+# the sole goal/project source. Create the first goal directly in Loom:
+PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
+  --db ~/.local/share/loom/loom.db goal add -n "..." -d "..." --status scheduled
+# wake.sh resolves whichever goal has the highest priority among
+# scheduled/in_progress goals automatically -- no activation step needed for
+# a single goal. See tools/goal_switch.sh to switch which goal is active
+# once you have more than one.
 
 # 4. Configure environment
 cp state/agent_config.env.example state/agent_config.env
 # Set AGENT_NAME, OWNER_NAME, NODE_VERSION
+# Optionally set DEFAULT_GOAL_ID once you've created a standing goal in Loom
+# for the agent to fall back to when no goal/project/task is eligible --
+# see the commented example in agent_config.env.example. Leave unset to fall
+# back to plain philosophy with no goal framing.
 
 # 5. Configure Telegram (for communication)
 # Add to ~/.claude/.env:
@@ -137,8 +144,8 @@ node/
 │   └── ...                          # More in tools/
 ├── prompts/
 │   ├── wrapper_prompt.md            # Session wrapper (orientation, shutdown, memory)
-│   ├── goal.txt                     # Current agent goal (YOU fill this in)
 │   ├── persona.txt                  # Agent persona (YOU fill this in)
+│   │                                 # (goal lives in Loom now, not a file here)
 │   └── session_types/               # Per-type prompts (execution, planning, etc.)
 ├── config/
 │   └── session_types/               # YAML config for each session type

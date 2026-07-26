@@ -24,7 +24,7 @@ How timers are named:
 How timers are created:
   systemd-run --user --unit="agent-one-off-{label}" --on-calendar="{datetime}" \\
               --property="WorkingDirectory={project_dir}" \\
-              bash scripts/wake.sh prompts/goal.txt prompts/persona.txt
+              bash scripts/wake.sh prompts/persona.txt
 
 The unit fires once and is automatically removed by systemd after completion.
 resolve_session_type.py in wake.sh picks up the one_off entry by datetime match
@@ -159,9 +159,9 @@ def schedule_entry(entry: dict, project_dir: Path, dry_run: bool) -> bool:
     # Format datetime for systemd OnCalendar: YYYY-MM-DD HH:MM:SS
     calendar_str = dt.strftime("%Y-%m-%d %H:%M:%S")
     trigger_mode = entry.get("trigger", "manual")
-    goal_file = project_dir / "prompts" / "goal.txt"
     persona_file = project_dir / "prompts" / "persona.txt"
 
+    # Goal is resolved from Loom inside wake.sh itself — no file to pass.
     cmd = [
         "systemd-run",
         "--user",
@@ -171,7 +171,6 @@ def schedule_entry(entry: dict, project_dir: Path, dry_run: bool) -> bool:
         f"--setenv=TRIGGER_MODE={trigger_mode}",
         "--",
         "bash", str(project_dir / "scripts" / "wake.sh"),
-        str(goal_file),
         str(persona_file) if persona_file.exists() else "",
     ]
     # Remove empty trailing args

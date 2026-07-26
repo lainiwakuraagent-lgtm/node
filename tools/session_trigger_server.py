@@ -32,8 +32,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 TOKEN_FILE = PROJECT_DIR / "state" / "trigger_token.txt"
 WAKE_SH = PROJECT_DIR / "scripts" / "wake.sh"
-GOAL_FILE = PROJECT_DIR / "prompts" / "emergency_goal.txt"
-GOAL_FILE_FALLBACK = PROJECT_DIR / "prompts" / "default_goal.txt"
 PERSONA_FILE = PROJECT_DIR / "prompts" / "persona.txt"
 
 logging.basicConfig(
@@ -55,19 +53,11 @@ def fire_session() -> str:
     if not WAKE_SH.exists():
         return f"wake.sh not found at {WAKE_SH}"
 
-    if GOAL_FILE.exists():
-        goal = str(GOAL_FILE)
-    elif GOAL_FILE_FALLBACK.exists():
-        goal = str(GOAL_FILE_FALLBACK)
-        log.info("emergency_goal.txt not found — falling back to default_goal.txt")
-    else:
-        goal = ""
+    # Goal is resolved from Loom inside wake.sh itself now — no file to check
+    # or fall back on here.
     persona = str(PERSONA_FILE) if PERSONA_FILE.exists() else ""
 
-    if not goal:
-        return "no goal file found — trigger aborted (emergency_goal.txt and default_goal.txt both missing)"
-
-    cmd = ["bash", str(WAKE_SH), goal]
+    cmd = ["bash", str(WAKE_SH)]
     if persona:
         cmd.append(persona)
 

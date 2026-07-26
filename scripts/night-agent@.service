@@ -8,7 +8,6 @@ Type=oneshot
 WorkingDirectory=%h/lain/%i
 Environment=TRIGGER_MODE=nightly
 ExecStart=/usr/bin/bash %h/lain/%i/scripts/wake.sh \
-  %h/lain/%i/prompts/goal.txt \
   %h/lain/%i/prompts/persona.txt
 # Hard ceiling so a stuck session can never run past the window.
 TimeoutStartSec=7h

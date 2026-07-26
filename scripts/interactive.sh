@@ -40,15 +40,17 @@ echo ""
 
 # --- Refresh Loom context snapshot (non-fatal) ---
 if [ -d "$LOOM_SRC" ] && [ -f "$LOOM_SRC/.venv/bin/python" ]; then
-  ACTIVE_GOAL_ID=$(python3 -c \
-    "import sqlite3; c=sqlite3.connect('$LOOM_DB'); r=c.execute(\"SELECT id FROM goals WHERE status='active' LIMIT 1\").fetchone(); print(r[0] if r else '')" \
-    2>/dev/null || echo "")
+  loom_py() { PYTHONPATH="$LOOM_SRC" "$LOOM_SRC/.venv/bin/python" -m loom.cli --db "$LOOM_DB" "$@"; }
+
+  # Single source of truth for active-goal resolution (priority DESC, id ASC
+  # among scheduled/in_progress) — was previously a local `status='active'`
+  # query here that could never match, since that status value doesn't exist.
+  ACTIVE_GOAL_ID=$(loom_py goal resolve-active 2>/dev/null || echo "")
   GOAL_ARG=""
   if [ -n "$ACTIVE_GOAL_ID" ]; then
     GOAL_ARG="--goal $ACTIVE_GOAL_ID"
   fi
-  PYTHONPATH="$LOOM_SRC" "$LOOM_SRC/.venv/bin/python" -m loom.cli \
-    --db "$LOOM_DB" context $GOAL_ARG --output "state/loom_context.json" > /dev/null 2>&1 \
+  loom_py context $GOAL_ARG --output "state/loom_context.json" > /dev/null 2>&1 \
     && echo "[ok] Loom context refreshed (goal=${ACTIVE_GOAL_ID:-none})" \
     || echo "[warn] Loom context refresh failed (continuing)"
 fi

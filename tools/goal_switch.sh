@@ -4,10 +4,12 @@
 # Usage: goal_switch.sh <goal_id>
 #
 # What it does:
-#   1. Activates <goal_id> in the Loom DB (status → active).
-#   2. Demotes previously active goals to 'in_progress' (paused).
-#   3. Regenerates state/loom_context.json for the new active goal.
-#   4. Prints a confirmation.
+#   1. Activates <goal_id> in the Loom DB: bumps its priority above every
+#      other scheduled/in_progress goal and sets it to 'scheduled'. No other
+#      goal's status is touched — priority ordering alone decides which goal
+#      is active.
+#   2. Regenerates state/loom_context.json for the new active goal.
+#   3. Prints a confirmation.
 
 set -euo pipefail
 
@@ -34,7 +36,7 @@ fi
 loom_cmd() { PYTHONPATH="$LOOM_DIR" "$LOOM_PYTHON" -m loom.cli --db "$LOOM_DB" "$@"; }
 
 echo "[goal_switch] Activating goal $GOAL_ID..."
-loom_cmd goal activate "$GOAL_ID" --pause-others
+loom_cmd goal activate "$GOAL_ID"
 
 echo "[goal_switch] Generating context snapshot..."
 loom_cmd context --goal "$GOAL_ID" --output "$STATE_FILE"

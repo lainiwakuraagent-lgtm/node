@@ -61,8 +61,8 @@ do
 done
 
 # Optional but expected files
+# (goal.txt is gone — the active goal is resolved from Loom by wake.sh itself now)
 for f in \
-  "$PROJECT_DIR/prompts/goal.txt" \
   "$PROJECT_DIR/prompts/persona.txt"
 do
   if [ -f "$f" ]; then
