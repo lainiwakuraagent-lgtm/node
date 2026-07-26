@@ -1,5 +1,6 @@
 scope_id: 3
 scope_name: "Infrastructure & Integrations"
+scope_slug: infra
 
 context_files:
   - memory/latest_summary.md

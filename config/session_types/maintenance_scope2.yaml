@@ -1,5 +1,6 @@
 scope_id: 2
 scope_name: "Code & Architecture"
+scope_slug: code
 
 context_files:
   - memory/latest_summary.md

@@ -1,5 +1,6 @@
 scope_id: 1
 scope_name: "Memory & Context"
+scope_slug: memory
 
 context_files:
   - memory/latest_summary.md
