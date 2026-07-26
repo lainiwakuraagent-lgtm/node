@@ -52,7 +52,7 @@ Check context after every major section. When you hit 50%, stop and write memory
 
 6. **Codebase brief refresh** (if brief is absent or >7 days old):
    - Run: `python3 tools/codebase_indexer.py .`
-   - Output: `memory/codebase_briefs/agent_project.md`
+   - Output: `memory/codebase_briefs/<project-name>.md` (auto-named from the indexed directory)
    - Non-fatal — takes ~1 second, no external deps.
 
 7. **Vector embedding housekeeping** (if Ollama is available):
