@@ -472,19 +472,23 @@ def main():
     parser.add_argument("--session-key", help="Session key (YYYY-MM-DD_N)")
     _session_type_choices = [
         "execution", "planning", "maintenance", "philosophy", "free",
-        "creative", "blocker_resolver",
-        "maintenance_memory", "maintenance_code", "maintenance_infra",
+        "reflection", "audit", "evaluation", "conversation", "interactive",
     ]
     _default_session_type = os.environ.get("CURRENT_SESSION_TYPE", "")
     if not _default_session_type:
         _type_file = Path(__file__).parent.parent / "state" / "current_session_type.txt"
         if _type_file.exists():
             _default_session_type = _type_file.read_text().strip()
-    if _default_session_type not in _session_type_choices:
+    # Strip maintenance scope suffix (e.g. "maintenance:scope1" → "maintenance") for choice validation.
+    _default_session_type_base = _default_session_type.split(":")[0] if _default_session_type else ""
+    if _default_session_type_base not in _session_type_choices:
         _default_session_type = "execution"
+    else:
+        _default_session_type = _default_session_type_base
     parser.add_argument("--session-type", default=_default_session_type,
                         choices=_session_type_choices,
-                        help="Session type (default: $CURRENT_SESSION_TYPE env var or 'execution')")
+                        help="Session type (default: $CURRENT_SESSION_TYPE or 'execution'). "
+                             "Accepted: " + ", ".join(_session_type_choices))
     parser.add_argument("--exit-reason", default="natural_stop",
                         choices=["time_limit", "context_limit", "natural_stop", "gate_abort"],
                         help="Why the session ended")

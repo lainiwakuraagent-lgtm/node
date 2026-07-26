@@ -15,7 +15,7 @@ context_files:
   - state/loom_context.json
   - memory/work/soul.md
   - memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md
-  - memory/work/lain_notes.md
+  - memory/work/${AGENT_NAME}_notes.md
 
 behavioral_overrides:
   focus_mode: analytical

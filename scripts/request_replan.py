@@ -16,12 +16,14 @@ Usage:
 """
 
 import argparse
+import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-LOOM_DB_PATH = Path.home() / ".local" / "share" / "loom" / "loom.db"
+LOOM_DB_PATH = (Path(os.environ["LOOM_DB"]) if "LOOM_DB" in os.environ
+                else Path.home() / ".local" / "share" / "loom" / "loom.db")
 
 
 def parse_args():

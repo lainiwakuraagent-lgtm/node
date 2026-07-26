@@ -16,7 +16,7 @@ context_files:
   - memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md
   - state/philosophy_drafts.md
   - state/conversation/conv_notes.md
-  - memory/work/lain_notes.md
+  - memory/work/${AGENT_NAME}_notes.md
 
 behavioral_overrides:
   focus_mode: creative

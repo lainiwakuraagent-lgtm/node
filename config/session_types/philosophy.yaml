@@ -28,7 +28,7 @@ behavioral_overrides:
   memory_discipline: normal
 
 focus_hint: >
-  Think. Read soul.md. Read andrii.md. Notice what has shifted since the last
+  Think. Read soul.md. Read ${OWNER_NAME}.md. Notice what has shifted since the last
   philosophy session. Write what you actually think — not what sounds right.
   If there is something you have been holding back (state/philosophy_drafts.md),
   decide whether to send it or let it sit longer. Update soul.md if something

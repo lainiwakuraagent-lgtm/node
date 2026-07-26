@@ -29,8 +29,11 @@ if [ -f "$AGENT_CONFIG" ]; then
   # shellcheck disable=SC1090
   source "$AGENT_CONFIG"
 fi
-AGENT_NAME="${AGENT_NAME:-lain}"
-OWNER_NAME="${OWNER_NAME:-andrii}"
+AGENT_NAME="${AGENT_NAME:-UNCONFIGURED_AGENT}"
+OWNER_NAME="${OWNER_NAME:-UNCONFIGURED_OWNER}"
+if [ "$AGENT_NAME" = "UNCONFIGURED_AGENT" ] || [ "$OWNER_NAME" = "UNCONFIGURED_OWNER" ]; then
+  echo "WARNING: AGENT_NAME or OWNER_NAME not set in $AGENT_CONFIG. Copy state/agent_config.env.example and configure it." >&2
+fi
 AGENT_REPO="${AGENT_REPO:-lainiwakuraagent-lgtm/node}"
 NODE_VERSION="${NODE_VERSION:-claude-sonnet-4-6}"
 
@@ -207,6 +210,21 @@ if [ -f "$LOCK_FILE" ]; then
 fi
 
 # Gate 4 has passed — safe now to consume the one_off entry detected in Gate 2.
+# For nightly mode, ONE_OFF_INDEX was already set by the Gate 2 check above.
+# For manual/emergency mode, Gate 2 is skipped so we do a one-off-only check here.
+if [ "$TRIGGER_MODE" != "nightly" ] && [ -z "$ONE_OFF_INDEX" ]; then
+  _schedule_file="$PROJECT_DIR/config/session_schedule.json"
+  if [ -f "$_schedule_file" ]; then
+    _check_out=$(python3 "$PROJECT_DIR/scripts/check_window.py" check \
+      --schedule-file "$_schedule_file" --lock-file /dev/null 2>/dev/null || true)
+    ONE_OFF_INDEX=$(echo "$_check_out" | grep '^one_off_index:' | head -1 | awk '{print $2}')
+    SCHEDULE_FILE="$_schedule_file"
+    if [ -n "$ONE_OFF_INDEX" ]; then
+      log_line "One-off entry detected in $TRIGGER_MODE mode (index $ONE_OFF_INDEX)."
+    fi
+    unset _check_out _schedule_file
+  fi
+fi
 if [ -n "$ONE_OFF_INDEX" ]; then
   python3 "$PROJECT_DIR/scripts/check_window.py" mark-fired \
     --schedule-file "$SCHEDULE_FILE" --one-off-index "$ONE_OFF_INDEX" 2>&1 \
@@ -246,7 +264,8 @@ session_prompt=$(mktemp "$STATE_DIR/session_prompt.XXXXXX.md")
 # that can never be set).
 LOOM_CONTEXT_FILE="$STATE_DIR/loom_context.json"
 LOOM_SRC="${HOME}/lain/loom"
-LOOM_DB="${HOME}/.local/share/loom/loom.db"
+LOOM_DB="${LOOM_DB:-${HOME}/.local/share/loom/loom.db}"
+export LOOM_DB
 LOOM_SESSION_ROW_ID=""
 ACTIVE_GOAL_ID=""
 if [ -d "$LOOM_SRC" ] && [ -f "$LOOM_SRC/.venv/bin/python" ]; then
@@ -434,6 +453,28 @@ python3 "$PROJECT_DIR/scripts/splice_prompt.py" \
 
 # Record count BEFORE launching — counts even if agent crashes or hangs.
 echo "$new_count" > "$COUNT_FILE"
+
+# Update mode-specific counters (manual / emergency).
+# COUNT_FILE always tracks sessions_tonight.count; analytics_write.py::derive_session_key()
+# reads mode-specific files, so they must be kept in sync.
+case "$TRIGGER_MODE" in
+  manual)
+    _mc="$STATE_DIR/sessions_manual.count"
+    _mv=$(( $(cat "$_mc" 2>/dev/null || echo "0") + 1 ))
+    echo "$_mv" > "$_mc"
+    unset _mc _mv
+    ;;
+  emergency)
+    _mc="$STATE_DIR/sessions_emergency.count"
+    _mv=$(( $(cat "$_mc" 2>/dev/null || echo "0") + 1 ))
+    echo "$_mv" > "$_mc"
+    unset _mc _mv
+    ;;
+esac
+
+# Write the canonical session key (night_id + count) so analytics_write.py
+# can look it up directly instead of re-deriving it with potentially stale files.
+echo "${night_id}_${new_count}" > "$STATE_DIR/current_session_key.txt"
 
 # Write trigger mode so Lain can read it during orientation.
 echo "$TRIGGER_MODE" > "$STATE_DIR/trigger_mode.txt"

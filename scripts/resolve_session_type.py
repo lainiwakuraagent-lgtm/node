@@ -69,7 +69,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-LOOM_DB_PATH = Path.home() / ".local" / "share" / "loom" / "loom.db"
+LOOM_DB_PATH = (Path(os.environ["LOOM_DB"]) if "LOOM_DB" in os.environ
+                else Path.home() / ".local" / "share" / "loom" / "loom.db")
 
 
 def parse_args():
@@ -182,15 +183,18 @@ def _check_queue_state(conn: sqlite3.Connection) -> tuple:
         rows = conn.execute(
             "SELECT id, name, depends FROM tasks "
             "WHERE status = 'needs_plan' "
+            "ORDER BY priority DESC, id ASC "
             "LIMIT 20"
         ).fetchall()
         actionable = []
         for row in rows:
             deps_raw = row["depends"]
             if deps_raw:
-                # depends column can be JSON array or comma-separated ints
+                # depends column can be JSON array, bare int, or comma-separated ints
                 try:
                     dep_ids = json.loads(deps_raw)
+                    if isinstance(dep_ids, int):
+                        dep_ids = [dep_ids]
                 except (json.JSONDecodeError, TypeError):
                     try:
                         dep_ids = [int(x) for x in str(deps_raw).split(",") if x.strip()]
@@ -232,6 +236,7 @@ def _check_queue_state(conn: sqlite3.Connection) -> tuple:
             "SELECT id, name, depends FROM tasks "
             "WHERE status IN ('scheduled', 'in_progress') "
             "AND tags LIKE '%milestone_review%' "
+            "ORDER BY priority DESC, id ASC "
             "LIMIT 10"
         ).fetchall()
         audit_candidates = []
@@ -240,6 +245,8 @@ def _check_queue_state(conn: sqlite3.Connection) -> tuple:
             if deps_raw:
                 try:
                     dep_ids = json.loads(deps_raw)
+                    if isinstance(dep_ids, int):
+                        dep_ids = [dep_ids]
                 except (json.JSONDecodeError, TypeError):
                     dep_ids = []
                 if dep_ids:
@@ -635,9 +642,11 @@ def load_agent_identity(project_dir: Path) -> dict:
     content, so a differently-named clone doesn't silently lose relationship
     context (identity paths used to be hardcoded to lain/andrii everywhere).
     """
-    identity = {"AGENT_NAME": "lain", "OWNER_NAME": "andrii"}
+    identity = {"AGENT_NAME": "UNCONFIGURED_AGENT", "OWNER_NAME": "UNCONFIGURED_OWNER"}
     config_path = project_dir / "state" / "agent_config.env"
     if not config_path.exists():
+        import sys
+        print(f"WARNING: {config_path} missing — AGENT_NAME/OWNER_NAME unset. Copy state/agent_config.env.example.", file=sys.stderr)
         return identity
     try:
         for line in config_path.read_text(encoding="utf-8").splitlines():

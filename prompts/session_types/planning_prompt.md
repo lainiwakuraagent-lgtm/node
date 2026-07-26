@@ -26,7 +26,7 @@ Think first. Let the plan catch up to reality before adding more layers.
   design/planning doc via the Loom `files` column:
   ```python
   import sqlite3, json
-  db = sqlite3.connect('/home/andrii/.local/share/loom/loom.db')
+  db = sqlite3.connect(os.path.expanduser('~/.local/share/loom/loom.db'))
   db.execute('UPDATE tasks SET files=? WHERE id=<TASK_ID>',
              (json.dumps(['memory/work/goal_1/your_design_doc.md']),))
   db.commit()

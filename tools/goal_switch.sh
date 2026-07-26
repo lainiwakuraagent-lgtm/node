@@ -14,10 +14,17 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOOM_DIR="/home/andrii/lain/loom"
+LOOM_DIR="${HOME}/lain/loom"
 LOOM_PYTHON="$LOOM_DIR/.venv/bin/python"
 STATE_FILE="$PROJECT_DIR/state/loom_context.json"
-LOOM_DB="${HOME}/.local/share/loom/loom.db"
+
+# Source agent_config.env so LOOM_DB is available if set per-clone
+AGENT_CONFIG="$PROJECT_DIR/state/agent_config.env"
+if [ -f "$AGENT_CONFIG" ]; then
+    # shellcheck source=/dev/null
+    source "$AGENT_CONFIG"
+fi
+LOOM_DB="${LOOM_DB:-${HOME}/.local/share/loom/loom.db}"
 
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <goal_id>" >&2

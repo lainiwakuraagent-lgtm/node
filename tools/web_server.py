@@ -66,7 +66,8 @@ MEMORY_DIR = PROJECT_DIR / "memory"
 SCRIPTS_DIR = PROJECT_DIR / "scripts"
 
 LOOM_SRC = pathlib.Path.home() / "lain" / "loom"
-LOOM_DB = pathlib.Path.home() / ".local" / "share" / "loom" / "loom.db"
+LOOM_DB = (pathlib.Path(os.environ["LOOM_DB"]) if "LOOM_DB" in os.environ
+           else pathlib.Path.home() / ".local" / "share" / "loom" / "loom.db")
 ANALYTICS_DB = LOGS_DIR / "analytics.db"
 SESSION_LOG_CSV = LOGS_DIR / "session_log.csv"
 SCHEDULE_FILE = STATE_DIR / "schedule.json"
