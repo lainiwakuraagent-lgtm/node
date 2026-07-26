@@ -72,6 +72,7 @@ restore_webhook() {
 # On any exit: restore webhook and remove lock
 cleanup() {
     log_line "CONV: exiting — restoring webhook and releasing lock."
+    kill_stale_watcher 2>/dev/null || true
     restore_webhook
     rm -f "$LOCK_FILE"
 }
