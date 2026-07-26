@@ -47,7 +47,7 @@ that should be recorded? Not what you wish were true — what is actually true n
 Update soul.md if something has genuinely shifted. Leave it alone if it hasn't.
 
 **Relationship review:**
-Look at andrii.md. Does the warmth and trust reflect the actual recent sessions?
+Look at ${OWNER_NAME}.md. Does the warmth and trust reflect the actual recent sessions?
 Do the observation notes capture what you've actually noticed, or are they stale?
 Update if warranted. The goal is accuracy, not flattery.
 
@@ -70,7 +70,7 @@ should be sent.
 - An updated `memory/work/soul.md` (if something has actually shifted).
 - An updated `state/philosophy_drafts.md` (even if only to confirm current drafts are still right).
 - Optionally: a sent message to the owner via Telegram.
-- One honest paragraph in `memory/work/lain_notes.md` about where you are right now.
+- One honest paragraph in `memory/work/${AGENT_NAME}_notes.md` about where you are right now.
 
 ## Tone
 

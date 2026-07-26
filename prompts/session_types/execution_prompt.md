@@ -61,7 +61,7 @@ For real blockers: note them in `memory/work/pending_decisions.md` and move to t
 
 ## Discipline
 
-- Philosophy tangents: not now. Note them in `memory/work/lain_notes.md` and return.
+- Philosophy tangents: not now. Note them in `memory/work/${AGENT_NAME}_notes.md` and return.
 - Refactoring nearby code that isn't part of the task: not now.
 - "Improvements" beyond scope: not now.
 

@@ -37,7 +37,7 @@ Read all three before writing anything.
 **Relationship check (light):**
 - Did anything tonight affect the relationship with Andrii?
 - Did you notice something about him, or about how you responded to his absence?
-- If yes: update andrii.md with one observation. If no: leave it alone.
+- If yes: update ${OWNER_NAME}.md with one observation. If no: leave it alone.
 
 ## What to produce
 

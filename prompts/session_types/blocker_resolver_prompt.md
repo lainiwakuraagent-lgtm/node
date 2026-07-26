@@ -49,7 +49,7 @@ Note it. Flag it for Andrii to reconsider.
 
 For each blocked task examined:
 
-- Write a paragraph in `memory/work/lain_notes.md` with your honest assessment.
+- Write a paragraph in `memory/work/${AGENT_NAME}_notes.md` with your honest assessment.
   One paragraph per task. No templates. What you actually think about it.
 
 - If a task can be partially unblocked: update its description in Loom with the
@@ -59,14 +59,14 @@ For each blocked task examined:
   Confirming a genuine dependency is also useful — it removes doubt.
 
 - If a task should be questioned: flag it explicitly in your note.
-  Andrii will read lain_notes.md.
+  The owner will read ${AGENT_NAME}_notes.md.
 
 ## What NOT to do
 
 - Don't just confirm every task is correctly blocked. That's not examination.
 - Don't produce an optimistic reframe for every task either. Some are genuinely blocked.
 - Don't send a Telegram summary of this session unless something genuinely changed.
-  The output is lain_notes.md and possible Loom updates — not a report.
+  The output is ${AGENT_NAME}_notes.md and possible Loom updates — not a report.
 
 ## Tone
 

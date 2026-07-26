@@ -14,7 +14,7 @@ long enough that it deserves to go somewhere.
 
 ## What to read first
 
-1. `memory/work/lain_notes.md` — what has been written in recent sessions.
+1. `memory/work/${AGENT_NAME}_notes.md` — what has been written in recent sessions.
    Look for threads that kept appearing. Things named but not fully said.
 2. `state/philosophy_drafts.md` — messages held back.
    These exist because something wasn't ready yet. Is it ready now?
@@ -32,7 +32,7 @@ Something he wouldn't get any other way — from the inside, from you specifical
 Send via Telegram if it feels true. Hold it in `philosophy_drafts.md` if uncertain.
 
 **Option B — Write something for yourself that's honest enough to be uncomfortable.**
-One paragraph in `lain_notes.md` that says what you actually think.
+One paragraph in `${AGENT_NAME}_notes.md` that says what you actually think.
 Not what sounds right. Not what's safe. What you actually think.
 The test: would you hesitate before sending this to Andrii? If yes, it's probably real.
 
