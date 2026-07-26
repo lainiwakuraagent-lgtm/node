@@ -79,11 +79,10 @@ Then start the message-wait loop below.
 9. **Check for signals** — on EVERY wakeup (message received OR timeout), check:
     - Read `state/conversation/reset_signal.txt` if it exists
     - If `action` is `idle_close`:
-      0. Run `python3 tools/escalate_questions.py` (escalates open questions + schedules philosophy session)
-      1. Write `state/conversation/checkpoint.json` (same format as context-full exit: brief 3-5 line summary)
-      2. Delete `reset_signal.txt` (consume the signal)
-      3. Write `idle_close` to `state/conversation/exit_reason.txt`
-      4. Exit 0
+      0. Write `state/conversation/checkpoint.json` (same format as context-full exit: brief 3-5 line summary)
+      1. Delete `reset_signal.txt` (consume the signal)
+      2. Write `idle_close` to `state/conversation/exit_reason.txt`
+      3. Exit 0
     - If `action` is `reset` or `new`:
       1. Write checkpoint.json
       2. Delete reset_signal.txt

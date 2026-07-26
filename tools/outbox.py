@@ -33,8 +33,8 @@ Routing (done by drain):
   type=question + to=owner   -> Telegram (prefixed "Question for you:")
 
 A question-type send() also appends to state/conversation/open_questions.json
-(status=open). The conversational layer marks entries answered in-session;
-tools/escalate_questions.py escalates anything still open at idle-close.
+(status=open). The conversational layer marks entries answered in-session.
+Entries still open at idle-close are left as-is -- no automatic escalation.
 """
 
 import argparse
