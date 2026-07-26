@@ -1,38 +1,56 @@
 # Audit Session — Type Prompt
 # Injected into the <GOAL> block when session_type=audit
 
-This is an audit session. A milestone claims to be done. Verify it.
+This is an audit session. A milestone task, or an entire goal claiming
+`review` status, says it's done. Verify it.
 
 ## Mode: AUDIT
 
-A task tagged `milestone_review` has all its dependencies satisfied and is
-waiting for someone to check whether the milestone it represents actually
-holds up. Your job is verification, not new work.
+Either a task tagged `milestone_review` has all its dependencies satisfied
+and is waiting for verification, or a goal has reached `review` status --
+the goal-level equivalent, checked first when both are pending: has
+everything the goal set out to do actually landed, not just individually
+but as a whole? Your job is verification, not new work.
 
 ## How to proceed
 
-1. Read `state/loom_context.json` to find the milestone_review task(s).
-2. Read the task's description -- it should say what the milestone claims to
-   deliver. If it doesn't say clearly, that's itself a finding (note it).
-3. Check the actual deliverable:
+1. Read the `## TARGET` block above -- it names the specific goal or
+   milestone-review task this session is auditing, with full detail. That's
+   the record to act on, not whatever `state/loom_context.json`'s active
+   goal happens to be.
+2. If auditing a **task**: read its description -- it should say what the
+   milestone claims to deliver. If it doesn't say clearly, that's itself a
+   finding (note it).
+3. If auditing a **goal**: read every project and task under it (their final
+   statuses, not just the goal's own description) -- a goal in `review`
+   claims the whole tree is genuinely closed, not just abandoned-and-forgotten.
+4. Check the actual deliverable(s):
    - Does the artifact/file/feature it describes actually exist?
    - Does it work as described -- run it, read it, don't take the description's
      word for it?
    - Does it integrate cleanly with what it's supposed to touch (no broken
      imports, no orphaned references, no contradicted assumptions elsewhere)?
-4. Decide: does the milestone hold up as-is?
+5. Decide: does it hold up as-is?
 
 ## Outcomes
 
-**Holds up** -- mark the task done:
+**Holds up** -- close it out:
 ```
+# Task:
 PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
   --db ~/.local/share/loom/loom.db task edit <TASK_ID> -s done
-```
 
-**Doesn't hold up** -- do not mark it done. Create specific follow-up tasks
-describing exactly what's missing or broken (not "needs polish" -- name the
-actual gap), and leave the milestone_review task open until those close:
+# Goal:
+PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
+  --db ~/.local/share/loom/loom.db goal edit <GOAL_ID> -s done
+```
+For a goal audit that holds up, also write a closing note -- what the goal
+actually accomplished -- to `memory/latest_summary.md` or `memory/progress.md`.
+
+**Doesn't hold up** -- do not close it. Create specific follow-up tasks (or,
+for a goal, a follow-up project) describing exactly what's missing or broken
+(not "needs polish" -- name the actual gap), and leave the milestone_review
+task or review-status goal open until those close:
 ```
 PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
   --db ~/.local/share/loom/loom.db task add -n "..." -D "..." -t bug
@@ -48,7 +66,8 @@ PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
 
 ## What to produce
 
-- A verified done/not-done decision for each milestone_review task, backed by
-  what you actually checked (name the files/commands used to verify).
-- Follow-up tasks for anything that doesn't hold up.
+- A verified done/not-done decision for the record audited, backed by what
+  you actually checked (name the files/commands used to verify).
+- Follow-up tasks (or a follow-up project, for a goal audit) for anything
+  that doesn't hold up.
 - One line in `memory/latest_summary.md` noting what was audited and the result.

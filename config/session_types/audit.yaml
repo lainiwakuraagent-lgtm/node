@@ -1,11 +1,12 @@
 id: audit
 name: "Audit Session"
 description: >
-  Review milestone_review-tagged tasks whose dependencies are all done.
-  Fires when such tasks exist in scheduled/in_progress status. Verifies the
-  actual deliverable against what the milestone claimed, checks integration
-  with the rest of the system, and either closes the milestone or spins up
-  follow-up tasks for what's missing.
+  Review review-status goals, or milestone_review-tagged tasks whose
+  dependencies are all done (goals checked first when both are pending).
+  Verifies the actual deliverable(s) against what was claimed, checks
+  integration with the rest of the system, and either closes it out or spins
+  up follow-up work for what's missing. The specific matched record is in the
+  injected TARGET block, not necessarily state/loom_context.json's active goal.
 
 prompt_file: "prompts/session_types/audit_prompt.md"
 
@@ -24,12 +25,13 @@ behavioral_overrides:
   memory_discipline: normal
 
 focus_hint: >
-  Audit. Read the milestone_review task(s) in state/loom_context.json. Verify
-  the deliverable actually exists, works, and integrates with what it's supposed
-  to touch -- don't take the task description's word for it, check the artifact.
-  Mark the task done if it holds up. If it doesn't, create specific follow-up
-  tasks describing exactly what's missing or broken, and leave the milestone
-  task open until those close.
+  Audit. Read the goal or milestone_review task in the TARGET block above.
+  Verify the deliverable(s) actually exist, work, and integrate with what
+  they're supposed to touch -- don't take the description's word for it, check
+  the artifact. For a goal, also check every project/task under it is
+  genuinely closed. Close it out if it holds up. If it doesn't, create
+  specific follow-up work describing exactly what's missing or broken, and
+  leave it open until that closes.
 
 allowed_triggers:
   - nightly

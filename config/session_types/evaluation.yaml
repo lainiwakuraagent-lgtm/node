@@ -1,11 +1,13 @@
 id: evaluation
 name: "Evaluation Session"
 description: >
-  Assess desire-status Loom goals -- scope, feasibility, domain analysis.
-  Fires when the Loom queue has one or more goals with status=desire that
-  are not blocked. The goal itself hasn't been vetted yet: this session
-  decides whether it's ready to become real work (needs_plan), needs more
-  time (leave as desire), or shouldn't be pursued (suspended).
+  Assess desire-status Loom goals or projects -- scope, feasibility, fit.
+  Fires when the Loom queue has a goal or project with status=desire that
+  is not blocked (goals checked first). The record itself hasn't been vetted
+  yet: this session decides whether it's ready to become real work
+  (needs_plan), needs more time (leave as desire), or shouldn't be pursued
+  (suspended). The specific matched record is in the injected TARGET block,
+  not necessarily state/loom_context.json's active goal/project.
 
 prompt_file: "prompts/session_types/evaluation_prompt.md"
 
@@ -23,11 +25,12 @@ behavioral_overrides:
   memory_discipline: normal
 
 focus_hint: >
-  Evaluate. Read the desire-status goal(s) in state/loom_context.json. For each,
-  assess scope, feasibility, and fit with the active goal tree. Decide: promote
-  to needs_plan (ready for a planning session), leave as desire (not ready yet,
-  say why), or suspend (not worth pursuing, say why). Do not start implementation
-  work -- that belongs to planning/execution sessions downstream.
+  Evaluate. Read the desire-status goal or project in the TARGET block above.
+  Assess scope, feasibility, and fit (for a project, fit against its parent
+  goal). Decide: promote to needs_plan (ready for a planning session), leave
+  as desire (not ready yet, say why), or suspend (not worth pursuing, say why).
+  Do not start implementation work -- that belongs to planning/execution
+  sessions downstream.
 
 allowed_triggers:
   - nightly
