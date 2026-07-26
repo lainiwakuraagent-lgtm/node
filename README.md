@@ -93,16 +93,16 @@ echo "0" > state/sessions_manual.count
 
 ### Trigger modes (`state/trigger_mode.txt`)
 
-| Mode | When used | Time window | Session cap |
-|------|-----------|-------------|-------------|
-| `nightly` | Scheduled timer | 23:00–06:00 | Informational |
-| `emergency` | Daytime override | None | Informational |
-| `manual` | Owner trigger (port 8766) | None | Informational |
+| Mode | When used | Time window | Usage limit gate | Session cap |
+|------|-----------|-------------|-------------------|-------------|
+| `nightly` | Scheduled timer | 23:00–06:00 | Enforced | Informational |
+| `emergency` | Daytime override | None | Enforced | Informational |
+| `manual` | Owner trigger (port 8766), break-glass one-shot | None | Bypassed | Informational |
 
 ### Session lifecycle
 
 1. `wake.sh` fires (via systemd timer or manual trigger)
-2. Gates check: usage limit → time window → lock file
+2. Gates check: usage limit (skipped for `manual`) → time window (nightly only) → lock file
 3. Behavioral context generated from relationship state
 4. Session type resolved (execution / planning / maintenance / philosophy)
 5. Claude CLI launched with wrapper_prompt + goal + persona

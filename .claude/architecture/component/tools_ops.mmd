@@ -3,7 +3,7 @@
 flowchart TD
     subgraph ModeControl["Mode control (owner-operated)"]
         EM[emergency_mode.sh on|off\ninstalls/removes emergency timer\nwrites/deletes emergency_mode.active\nblocks or restores nightly sessions]
-        STS[session_trigger_server.py\nHTTP server on port 8766\nreceives manual trigger\nsets TRIGGER_MODE=manual]
+        STS[session_trigger_server.py\nHTTP server on port 8766\nreceives manual trigger\nsets TRIGGER_MODE=manual\nbreak-glass: skips usage-limit gate too]
     end
 
     subgraph GoalMgmt["Goal management"]
@@ -12,7 +12,7 @@ flowchart TD
     end
 
     subgraph Scheduling["Session scheduling"]
-        SO[schedule_one_off.py\nadd a one-off session\nto config/session_schedule.json\nfires once then marks fired]
+        SO[schedule_one_off.py\ninstalls a systemd timer for each\nunfired one_off entry already in\nconfig/session_schedule.json\nfires once then marks fired]
         SA[schedule_analytics.py\nanalyze schedule quality\nsession gap distribution\nwindow utilization stats]
         FI[scan_file_inbox.py\nscan inbox/files/\nfor dropped files\nroutes to agent inbox]
     end

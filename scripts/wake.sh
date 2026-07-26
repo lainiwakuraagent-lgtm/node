@@ -95,18 +95,27 @@ if [ "$last_recorded_night" != "$night_id" ]; then
 fi
 current_count=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
 
-# --- Gate 0: subscription usage limits (all modes) ---
-# Fail-open on errors so network/auth issues never silently kill the launch.
-usage_check_output=$(bash "$PROJECT_DIR/tools/check_session.sh" --usage 2>&1) \
-  || usage_check_output="ACTION: cannot check usage -- treat as unknown, proceed with caution."
-usage_action=$(echo "$usage_check_output" | grep '^ACTION:' | head -n1)
+# --- Gate 0: subscription usage limits (nightly + emergency) ---
+# manual is a deliberate break-glass override: it exists for exactly the case
+# where a session is needed despite hitting a usage limit, so it skips this
+# gate entirely rather than being fail-open on error like the other modes.
+# This is what distinguishes it from emergency mode, which bypasses the time
+# window but still respects usage limits.
+if [ "$TRIGGER_MODE" = "manual" ]; then
+  log_line "Gate 0 (usage check) bypassed -- TRIGGER_MODE=manual (break-glass override)."
+else
+  # Fail-open on errors so network/auth issues never silently kill the launch.
+  usage_check_output=$(bash "$PROJECT_DIR/tools/check_session.sh" --usage 2>&1) \
+    || usage_check_output="ACTION: cannot check usage -- treat as unknown, proceed with caution."
+  usage_action=$(echo "$usage_check_output" | grep '^ACTION:' | head -n1)
 
-if echo "$usage_action" | grep -q 'usage limit exceeded'; then
-  log_line "ABORT: subscription usage too high. check_session.sh --usage output: $usage_check_output"
-  exit 0
-fi
-if echo "$usage_action" | grep -q 'cannot check usage'; then
-  log_line "WARNING: could not check usage limits (proceeding). check_session.sh --usage output: $usage_check_output"
+  if echo "$usage_action" | grep -q 'usage limit exceeded'; then
+    log_line "ABORT: subscription usage too high. check_session.sh --usage output: $usage_check_output"
+    exit 0
+  fi
+  if echo "$usage_action" | grep -q 'cannot check usage'; then
+    log_line "WARNING: could not check usage limits (proceeding). check_session.sh --usage output: $usage_check_output"
+  fi
 fi
 
 # --- Gate 1 (nightly only): block if emergency mode is active ---
