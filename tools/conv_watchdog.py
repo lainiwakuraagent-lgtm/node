@@ -108,7 +108,8 @@ def watcher_alive() -> bool:
     if not WATCHER_PID_FILE.exists():
         return False
     try:
-        pid = int(WATCHER_PID_FILE.read_text().strip())
+        content = WATCHER_PID_FILE.read_text().strip()
+        pid = int(content.split(':')[0])  # support "watcher_pid:wrapper_pid" format (T323+)
         os.kill(pid, 0)  # signal 0 = existence check
         return True
     except (ValueError, ProcessLookupError, PermissionError):

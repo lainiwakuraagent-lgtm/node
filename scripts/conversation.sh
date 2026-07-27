@@ -136,11 +136,18 @@ kill_stale_watcher() {
 
         rm -f "$WATCHER_PID_FILE"
     fi
-    if pgrep -f "telegram_watcher.py" > /dev/null 2>&1; then
-        log_line "CONV: pkill fallback — killing stray telegram_watcher.py processes."
-        pkill -f "telegram_watcher.py" 2>/dev/null || true
-        sleep 1
-    fi
+    # Use /proc/<pid>/comm to filter out claude processes whose -p prompt text contains
+    # "telegram_watcher.py" as a string — only kill actual python3 processes.
+    local _killed_stray=0
+    while IFS= read -r stray_pid; do
+        stray_comm=$(cat "/proc/$stray_pid/comm" 2>/dev/null || echo "")
+        if [[ "$stray_comm" == python* ]]; then
+            log_line "CONV: pkill fallback — killing stray watcher PID $stray_pid (comm: $stray_comm)."
+            kill "$stray_pid" 2>/dev/null || true
+            _killed_stray=1
+        fi
+    done < <(pgrep -f "telegram_watcher.py" 2>/dev/null || true)
+    [ "$_killed_stray" = "1" ] && sleep 1
 }
 
 # --- Auto-restart loop ---
