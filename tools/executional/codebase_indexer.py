@@ -145,8 +145,8 @@ def list_directory(project_dir, subdir):
 def detect_entry_points(project_dir):
     """Heuristic: common entry point file names."""
     candidates = [
-        ("scripts/wake.sh", "main launcher"),
-        ("scripts/conversation.sh", "conversational layer"),
+        ("scripts/executional/wake.sh", "main launcher"),
+        ("scripts/conversational/conversation.sh", "conversational layer"),
         ("scripts/orchestrator.py", "task orchestrator"),
         ("tools/executional/session_trigger_server.py", "manual trigger server"),
         ("tools/conversational/telegram_webhook_handler.py", "Telegram webhook handler"),

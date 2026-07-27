@@ -24,7 +24,7 @@ How timers are named:
 How timers are created:
   systemd-run --user --unit="agent-one-off-{label}" --on-calendar="{datetime}" \\
               --property="WorkingDirectory={project_dir}" \\
-              bash scripts/wake.sh prompts/persona.txt
+              bash scripts/executional/wake.sh prompts/persona.txt
 
 The unit fires once and is automatically removed by systemd after completion.
 resolve_session_type.py in wake.sh picks up the one_off entry by datetime match
@@ -170,7 +170,7 @@ def schedule_entry(entry: dict, project_dir: Path, dry_run: bool) -> bool:
         f"--property=WorkingDirectory={project_dir}",
         f"--setenv=TRIGGER_MODE={trigger_mode}",
         "--",
-        "bash", str(project_dir / "scripts" / "wake.sh"),
+        "bash", str(project_dir / "scripts" / "executional" / "wake.sh"),
         str(persona_file) if persona_file.exists() else "",
     ]
     # Remove empty trailing args

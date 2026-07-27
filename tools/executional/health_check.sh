@@ -49,8 +49,8 @@ echo "=== Critical files ==="
 for f in \
   "$PROJECT_DIR/tools/executional/check_session.sh" \
   "$PROJECT_DIR/tools/executional/health_check.sh" \
-  "$PROJECT_DIR/scripts/wake.sh" \
-  "$PROJECT_DIR/scripts/splice_prompt.py" \
+  "$PROJECT_DIR/scripts/executional/wake.sh" \
+  "$PROJECT_DIR/scripts/executional/splice_prompt.py" \
   "$PROJECT_DIR/prompts/wrapper_prompt.md"
 do
   if [ -f "$f" ]; then
@@ -79,7 +79,7 @@ echo "=== Executability ==="
 for f in \
   "$PROJECT_DIR/tools/executional/check_session.sh" \
   "$PROJECT_DIR/tools/executional/health_check.sh" \
-  "$PROJECT_DIR/scripts/wake.sh"
+  "$PROJECT_DIR/scripts/executional/wake.sh"
 do
   if [ -x "$f" ]; then
     ok "executable: $(basename "$f")"

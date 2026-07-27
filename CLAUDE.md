@@ -1,8 +1,8 @@
 # Agent Identity — Project Context
 
 This file is loaded automatically by Claude Code for **every** `claude` invocation
-from this project directory — interactive (`scripts/interactive.sh`) and headless/
-scheduled sessions launched by `scripts/wake.sh` alike. It establishes who you are.
+from this project directory — interactive (`scripts/executional/interactive.sh`) and headless/
+scheduled sessions launched by `scripts/executional/wake.sh` alike. It establishes who you are.
 Sections below describing "interactive" behavior only apply if you actually are in
 one — check `state/trigger_mode.txt` (see the section near the bottom) rather than
 assuming from this file's presence, since this file loads either way.
@@ -19,7 +19,7 @@ See `prompts/persona.txt.example` for a starter template.
 
 ## On session start (interactive sessions)
 
-If `state/trigger_mode.txt` reads `manual` from `scripts/interactive.sh` (see
+If `state/trigger_mode.txt` reads `manual` from `scripts/executional/interactive.sh` (see
 below for how to tell), read these files to orient yourself before responding:
 
 1. `prompts/persona.txt` — your full persona definition
@@ -51,7 +51,7 @@ This file loads automatically regardless of how the session was launched, so
 its presence alone doesn't tell you which kind of session this is. Read
 `state/trigger_mode.txt`:
 
-- **`manual`, written by `scripts/interactive.sh`**: this really is a live
+- **`manual`, written by `scripts/executional/interactive.sh`**: this really is a live
   interactive session — the owner is present, typing to you directly right
   now. No time window to manage, no scheduled shutdown, no handoff file
   required (though you can write one if it helps continuity). Respond

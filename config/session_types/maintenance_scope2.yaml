@@ -17,7 +17,7 @@ focus_hint: >
   state/agent_config.env, if set, still points at a real goal.
   Check config/session_types/*.yaml for stale context_files references --
   paths that no longer exist, or files that moved since the config was written.
-  Run scripts/tag_skill_lookup.py --validate-all to catch broken SOP resolution.
+  Run scripts/executional/tag_skill_lookup.py --validate-all to catch broken SOP resolution.
   Scan scripts/ and tools/ for hardcoded absolute paths or other machine-specific
   assumptions -- anything that only works on the exact machine it was written on
   is a recurring drift pattern worth catching early.

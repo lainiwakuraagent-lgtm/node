@@ -69,7 +69,7 @@ if [ "$ACTION" = "on" ]; then
   # interval is written dynamically per-instance so no manual edits to the
   # .timer file are needed, just pass a different interval to this script.
   mkdir -p "$SYSTEMD_USER_DIR"
-  cp "$SCRIPTS_DIR/emergency-agent@.service" "$SYSTEMD_USER_DIR/emergency-agent@.service"
+  cp "$SCRIPTS_DIR/executional/emergency-agent@.service" "$SYSTEMD_USER_DIR/emergency-agent@.service"
   cat > "$SYSTEMD_USER_DIR/${TIMER_UNIT}" <<EOF
 [Unit]
 Description=Emergency Agent Timer — ${INSTANCE} — fires every ${INTERVAL_MIN} minutes

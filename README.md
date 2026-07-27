@@ -11,7 +11,7 @@ Built from @Lain's architecture. Tested across hundreds of sessions.
 
 A **node** is a single autonomous agent instance. It contains:
 
-- **Wake/schedule harness** — `scripts/wake.sh` with three trigger modes (nightly, emergency, manual)
+- **Wake/schedule harness** — `scripts/executional/wake.sh` with three trigger modes (nightly, emergency, manual)
 - **Systemd units** — night timer + emergency timer, user-level (no root needed), instance-templated per clone
 - **Tool suite** — Telegram communication, memory tools, analytics, reporting, scheduling
 - **Loom integration** — goal tracking, session lifecycle, task management (required)
@@ -71,11 +71,11 @@ cp state/delivery_routing.json.example state/delivery_routing.json
 # %h = your home dir -- no manual path/username editing needed. This DOES
 # require the clone to live at ~/lain/<name> (matching %h/lain/%i); if you
 # cloned it somewhere else, move it there first.
-cp scripts/night-agent@.* ~/.config/systemd/user/
+cp scripts/executional/night-agent@.* ~/.config/systemd/user/
 systemctl --user enable --now "night-agent@$(basename "$PWD").timer"
 
 # The same @-instance pattern applies to emergency-agent@, conv-watchdog@,
-# and conversation@ units (scripts/*.service, scripts/*.timer) -- see
+# and conversation@ units (in scripts/executional/ and scripts/conversational/) -- see
 # tools/executional/emergency_mode.sh for how the emergency timer is installed
 # dynamically, and the Telegram section below for the conversational layer.
 
@@ -113,15 +113,26 @@ echo "0" > state/sessions_manual.count
 ```
 node/
 ├── scripts/
-│   ├── wake.sh                      # Main launcher — all modes, all gates
-│   ├── interactive.sh               # Owner-triggered interactive session
-│   ├── conversation.sh              # Conversational mode (Telegram, continuous)
-│   ├── night-agent@.{service,timer}    # Nightly schedule (systemd instance template)
-│   ├── emergency-agent@.{service,timer}# Emergency schedule (instance template)
-│   ├── conv-watchdog@.{service,timer}  # Conversation watchdog (instance template)
-│   ├── conversation@.service           # Conversational/Telegram mode (instance template)
-│   ├── resolve_session_type.py      # Session type dispatcher
-│   └── splice_prompt.py             # Prompt construction utility
+│   ├── nexus-watcher.service           # Nexus background poller (cross-layer)
+│   ├── conversational/                  # Owned by conversation.sh / voice_conversation.sh
+│   │   ├── conversation.sh             # Conversational mode (Telegram, continuous)
+│   │   ├── voice_conversation.sh       # Voice (wake-word + STT + TTS) mode
+│   │   ├── home_tts_play.sh            # Local TTS playback
+│   │   ├── conversation@.service       # Conversational mode service (instance template)
+│   │   ├── conv-watchdog@.service      # Conversation watchdog (instance template)
+│   │   └── conv-watchdog@.timer
+│   └── executional/                     # Owned by wake.sh / session wrapper
+│       ├── wake.sh                     # Main launcher — all modes, all gates
+│       ├── interactive.sh              # Owner-triggered interactive session
+│       ├── resolve_session_type.py     # Session type dispatcher
+│       ├── splice_prompt.py            # Prompt construction utility
+│       ├── check_window.py             # Session schedule window checker
+│       ├── request_replan.py           # Escape hatch: transition task to needs_plan
+│       ├── tag_skill_lookup.py         # SOP skill tag resolver
+│       ├── night-agent@.{service,timer}    # Nightly schedule (instance template)
+│       ├── emergency-agent@.{service,timer}# Emergency schedule (instance template)
+│       ├── argus-poller.{service,timer}    # Argus context polling
+│       └── web-ui@.service                 # Web UI service (instance template)
 ├── tools/
 │   ├── inbox.py                     # Inbox tool (startup|read|append|prune) — cross-layer seam
 │   ├── outbox.py                    # Outbox tool (send|drain|check) — cross-layer seam
@@ -203,10 +214,10 @@ TELEGRAM_ALLOWED_USERS=<your numeric chat id>
 Once configured, the agent can:
 - Send you status updates and task completion pings via `tools/conversational/telegram_send.sh`
 - Respond to `/commands` like `/status`, `/log`, `/goal`, `/report` via `tools/conversational/command_dispatcher.py`
-- Enter a real-time conversational mode via `scripts/conversation.sh`, run continuously as a
+- Enter a real-time conversational mode via `scripts/conversational/conversation.sh`, run continuously as a
   systemd instance service:
   ```bash
-  cp scripts/conversation@.service scripts/conv-watchdog@.{service,timer} ~/.config/systemd/user/
+  cp scripts/conversational/conversation@.service scripts/conversational/conv-watchdog@.{service,timer} ~/.config/systemd/user/
   systemctl --user enable --now "conversation@$(basename "$PWD").service"
   systemctl --user enable --now "conv-watchdog@$(basename "$PWD").timer"
   ```

@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$PROJECT_DIR"
 STATE_DIR="$PROJECT_DIR/state"
 LOG_DIR="$PROJECT_DIR/logs"
@@ -171,7 +171,7 @@ if [ "$TRIGGER_MODE" = "nightly" ]; then
   SCHEDULE_FILE="$PROJECT_DIR/config/session_schedule.json"
   LOCK_FILE_PRE="$STATE_DIR/session.lock"
 
-  window_result=$(python3 "$PROJECT_DIR/scripts/check_window.py" check \
+  window_result=$(python3 "$PROJECT_DIR/scripts/executional/check_window.py" check \
     --schedule-file "$SCHEDULE_FILE" --lock-file "$LOCK_FILE_PRE" 2>&1)
 
   log_line "Window check result: $window_result"
@@ -215,7 +215,7 @@ fi
 if [ "$TRIGGER_MODE" != "nightly" ] && [ -z "$ONE_OFF_INDEX" ]; then
   _schedule_file="$PROJECT_DIR/config/session_schedule.json"
   if [ -f "$_schedule_file" ]; then
-    _check_out=$(python3 "$PROJECT_DIR/scripts/check_window.py" check \
+    _check_out=$(python3 "$PROJECT_DIR/scripts/executional/check_window.py" check \
       --schedule-file "$_schedule_file" --lock-file /dev/null 2>/dev/null || true)
     ONE_OFF_INDEX=$(echo "$_check_out" | grep '^one_off_index:' | head -1 | awk '{print $2}')
     SCHEDULE_FILE="$_schedule_file"
@@ -226,7 +226,7 @@ if [ "$TRIGGER_MODE" != "nightly" ] && [ -z "$ONE_OFF_INDEX" ]; then
   fi
 fi
 if [ -n "$ONE_OFF_INDEX" ]; then
-  python3 "$PROJECT_DIR/scripts/check_window.py" mark-fired \
+  python3 "$PROJECT_DIR/scripts/executional/check_window.py" mark-fired \
     --schedule-file "$SCHEDULE_FILE" --one-off-index "$ONE_OFF_INDEX" 2>&1 \
     | while IFS= read -r _line; do log_line "$_line"; done
 fi
@@ -336,8 +336,8 @@ fi
 # Priority: SESSION_TYPE env var → Loom queue state → default (maintenance)
 # Resolves type, loads type config YAML, assembles context files + type prompt.
 SESSION_TYPE_RESULT=$(mktemp "$STATE_DIR/session_type_result.XXXXXX.json")
-if [ -f "$PROJECT_DIR/scripts/resolve_session_type.py" ]; then
-  _type_stderr=$(python3 "$PROJECT_DIR/scripts/resolve_session_type.py" \
+if [ -f "$PROJECT_DIR/scripts/executional/resolve_session_type.py" ]; then
+  _type_stderr=$(python3 "$PROJECT_DIR/scripts/executional/resolve_session_type.py" \
     --project-dir "$PROJECT_DIR" \
     --trigger-mode "$TRIGGER_MODE" \
     --output "$SESSION_TYPE_RESULT" 2>&1) || true
@@ -448,7 +448,7 @@ if [ -f "$_ACTIVE_PROJECT_PATH_FILE" ]; then
 fi
 unset _ACTIVE_PROJECT_PATH_FILE
 
-python3 "$PROJECT_DIR/scripts/splice_prompt.py" \
+python3 "$PROJECT_DIR/scripts/executional/splice_prompt.py" \
   "$WRAPPER_TEMPLATE" "$GOAL_FILE" "$session_prompt" "$persona_arg"
 
 # Record count BEFORE launching — counts even if agent crashes or hangs.

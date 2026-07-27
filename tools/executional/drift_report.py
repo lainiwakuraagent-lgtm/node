@@ -20,8 +20,8 @@ from pathlib import Path
 # Files to track for harness-level drift.
 # These exist in both blank_node and agent_project and should stay in sync.
 TRACKED_FILES = [
-    "scripts/wake.sh",
-    "scripts/resolve_session_type.py",
+    "scripts/executional/wake.sh",
+    "scripts/executional/resolve_session_type.py",
     "tools/executional/analytics_write.py",
     "tools/executional/relationship_update.py",
     "tools/executional/behavioral_adapter.py",

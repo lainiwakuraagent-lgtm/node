@@ -45,7 +45,7 @@ def project_dir_from_args() -> Path:
 
 
 PROJECT_DIR = project_dir_from_args()
-RESOLVER = PROJECT_DIR / "scripts" / "resolve_session_type.py"
+RESOLVER = PROJECT_DIR / "scripts" / "executional" / "resolve_session_type.py"
 
 PASS = "\033[32mPASS\033[0m"
 FAIL = "\033[31mFAIL\033[0m"

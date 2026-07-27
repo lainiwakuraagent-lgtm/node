@@ -48,7 +48,7 @@ is actually built out.
 
 **Note on Nexus removal (reopened 2026-07-24):** the Phase 0 checklist marked this done, but only
 `tools/check_nexus.sh` was actually deleted (T270/T271 review, 2026-07-24). Live Nexus code
-remains: `scripts/interactive.sh` refreshes a Nexus JWT token every interactive session — not
+remains: `scripts/executional/interactive.sh` refreshes a Nexus JWT token every interactive session — not
 dead, runs every time — and `tools/executional/web_server.py`, `tools/conversational/recap_generator.py`,
 `tools/executional/drift_report.py`, `tools/inbox.py`, and `CLAUDE.md` all still reference live Nexus
 state/tokens/channels.

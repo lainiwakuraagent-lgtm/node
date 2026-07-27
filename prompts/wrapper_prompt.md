@@ -100,7 +100,7 @@ Run these in order, every single wake, before touching the goal:
    **If CONV_ACTIVE=0**: Proceed as normal.
 
 5. **Your session type was algorithmically selected: {{SESSION_TYPE}}.**
-   Do not override this. The dispatcher (`scripts/resolve_session_type.py`)
+   Do not override this. The dispatcher (`scripts/executional/resolve_session_type.py`)
    examined the Loom queue state and schedule to pick the right session type.
    Work within the boundaries of your assigned type:
 
@@ -119,7 +119,7 @@ Run these in order, every single wake, before touching the goal:
    If you are in an **execution** session and hit a blocker you cannot resolve,
    do NOT switch to planning. Instead, request a replan via the escape hatch:
    ```
-   /usr/bin/python3 scripts/request_replan.py \
+   /usr/bin/python3 scripts/executional/request_replan.py \
      --task-id <TASK_ID> --reason "why replanning is needed"
    ```
    This transitions the task to `needs_plan` status. The next session's dispatcher

@@ -37,7 +37,7 @@ jobs:
       - name: Check required template files
         run: |
           required=(
-            "scripts/wake.sh"
+            "scripts/executional/wake.sh"
             "tools/conversational/check_replies.sh"
             "tools/conversational/telegram_send.sh"
             "tools/executional/check_session.sh"

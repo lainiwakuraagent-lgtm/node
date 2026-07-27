@@ -17,7 +17,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 PYTHON3="/usr/bin/python3"
 CLAUDE_CLI="${CLAUDE_CLI:-claude}"
@@ -148,7 +148,7 @@ while [ "$SHUTDOWN" -eq 0 ]; do
 
     # Step 5: Speak response
     log "Speaking..."
-    printf '%s' "$response" | bash "$PROJECT_DIR/scripts/home_tts_play.sh" || {
+    printf '%s' "$response" | bash "$PROJECT_DIR/scripts/conversational/home_tts_play.sh" || {
         log "TTS failed — response was: $response"
     }
 

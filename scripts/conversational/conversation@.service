@@ -1,6 +1,6 @@
 [Unit]
 Description=Conversational Agent — %i
-Documentation=file://%h/lain/%i/scripts/conversation.sh
+Documentation=file://%h/lain/%i/scripts/conversational/conversation.sh
 After=network-online.target
 Wants=network-online.target
 
@@ -10,7 +10,7 @@ WorkingDirectory=%h/lain/%i
 Environment=SESSION_TYPE=conversation
 Environment=TRIGGER_MODE=manual
 Environment=XDG_RUNTIME_DIR=%t
-ExecStart=/usr/bin/bash %h/lain/%i/scripts/conversation.sh
+ExecStart=/usr/bin/bash %h/lain/%i/scripts/conversational/conversation.sh
 # Restart on exit (crash or clean exit) — conversation.sh has its own inner loop,
 # but this outer restart handles cases where the script itself crashes hard.
 Restart=on-failure
