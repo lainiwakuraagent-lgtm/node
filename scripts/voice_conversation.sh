@@ -80,7 +80,7 @@ while [ "$SHUTDOWN" -eq 0 ]; do
     # Step 1: Listen for wake word
     log "Listening for wake word..."
     wake_exit=0
-    "$PYTHON3" "$PROJECT_DIR/tools/wake_word_listener.py" \
+    "$PYTHON3" "$PROJECT_DIR/tools/conversational/wake_word_listener.py" \
         --max-detections 1 \
         --timeout "$WAKE_TIMEOUT" &
     LISTENER_PID=$!
@@ -102,7 +102,7 @@ while [ "$SHUTDOWN" -eq 0 ]; do
     log "Wake word detected — recording..."
     rm -f "$TMP_WAV"
     record_exit=0
-    "$PYTHON3" "$PROJECT_DIR/tools/home_record.py" \
+    "$PYTHON3" "$PROJECT_DIR/tools/conversational/home_record.py" \
         --output "$TMP_WAV" \
         --silence-timeout "$RECORD_SILENCE" \
         --max-duration "$RECORD_MAX" || record_exit=$?
@@ -121,7 +121,7 @@ while [ "$SHUTDOWN" -eq 0 ]; do
     log "Transcribing..."
     transcription=""
     stt_exit=0
-    transcription=$("$PYTHON3" "$PROJECT_DIR/tools/home_stt.py" "$TMP_WAV" 2>/dev/null) \
+    transcription=$("$PYTHON3" "$PROJECT_DIR/tools/conversational/home_stt.py" "$TMP_WAV" 2>/dev/null) \
         || stt_exit=$?
     rm -f "$TMP_WAV"
 

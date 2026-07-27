@@ -22,7 +22,7 @@ Read all three before writing anything.
 ## What to work on
 
 **Wonder phase (do this first):**
-Run `python3 tools/wonder_module.py --wonder` to create a session file.
+Run `python3 tools/executional/wonder_module.py --wonder` to create a session file.
 Then write freely into it — questions you would normally skip as out of scope,
 things you haven't named, lines of thinking usually deferred. Examples of the
 shape:
@@ -37,7 +37,7 @@ No template. No required structure. Not conclusions, not plans — just genuine
 curiosity and whatever surfaces when you're not trying to produce anything.
 Aim for 300-500 words. Write for yourself, not for a reader.
 
-Optionally: `python3 tools/wonder_module.py --check-triggers` to surface
+Optionally: `python3 tools/executional/wonder_module.py --check-triggers` to surface
 interesting Loom states that might be worth examining (repeated blocking,
 planning loops, philosophy gaps).
 

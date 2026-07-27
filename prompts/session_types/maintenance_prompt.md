@@ -51,17 +51,17 @@ Check context after every major section. When you hit 50%, stop and write memory
    - If yes: update status in Loom and note in latest_summary.md.
 
 6. **Codebase brief refresh** (if brief is absent or >7 days old):
-   - Run: `python3 tools/codebase_indexer.py .`
+   - Run: `python3 tools/executional/codebase_indexer.py .`
    - Output: `memory/codebase_briefs/<project-name>.md` (auto-named from the indexed directory)
    - Non-fatal — takes ~1 second, no external deps.
 
 7. **Vector embedding housekeeping** (if Ollama is available):
-   - Run: `python3 tools/session_embed.py --status` to check coverage.
-   - If coverage is <80%: run `python3 tools/session_embed.py --limit 10` to catch up.
+   - Run: `python3 tools/executional/session_embed.py --status` to check coverage.
+   - If coverage is <80%: run `python3 tools/executional/session_embed.py --limit 10` to catch up.
    - Non-fatal — skip if Ollama unreachable (check_ollama exits 0 automatically).
 
 8. **Codebase narrative refresh** (if Ollama is available):
-   - Run: `python3 tools/codebase_narrative.py` to check/regenerate the narrative section.
+   - Run: `python3 tools/executional/codebase_narrative.py` to check/regenerate the narrative section.
    - Use `--force` to regenerate an existing narrative (e.g., after significant codebase changes).
    - Non-fatal — exits 0 silently if Ollama unreachable.
 

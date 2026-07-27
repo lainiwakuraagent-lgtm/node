@@ -38,9 +38,9 @@ jobs:
         run: |
           required=(
             "scripts/wake.sh"
-            "tools/check_replies.sh"
-            "tools/telegram_send.sh"
-            "tools/check_session.sh"
+            "tools/conversational/check_replies.sh"
+            "tools/conversational/telegram_send.sh"
+            "tools/executional/check_session.sh"
             "prompts/wrapper_prompt.md"
             "state/agent_config.env.example"
           )

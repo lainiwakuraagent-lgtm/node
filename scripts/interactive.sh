@@ -77,8 +77,8 @@ fi
 
 # --- Refresh behavioral context (non-fatal) ---
 BEHAVIORAL_PROFILE="memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md"
-if [ -f "tools/behavioral_adapter.py" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
-  /usr/bin/python3 tools/behavioral_adapter.py \
+if [ -f "tools/executional/behavioral_adapter.py" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
+  /usr/bin/python3 tools/executional/behavioral_adapter.py \
     --user-file "$BEHAVIORAL_PROFILE" \
     --output state/behavioral_context.txt > /dev/null 2>&1 \
     && echo "[ok] Behavioral context refreshed" \
@@ -124,7 +124,7 @@ if [ -n "$SIDE_PROJECT" ]; then
   # Generate/refresh codebase brief (non-fatal)
   BRIEF_DIR="${PROJECT_DIR}/memory/architecture/codebase_briefs"
   mkdir -p "$BRIEF_DIR"
-  /usr/bin/python3 "${PROJECT_DIR}/tools/codebase_indexer.py" "$SIDE_PROJECT" \
+  /usr/bin/python3 "${PROJECT_DIR}/tools/executional/codebase_indexer.py" "$SIDE_PROJECT" \
     --output "${BRIEF_DIR}/${SIDE_PROJECT_NAME}.md" > /dev/null 2>&1 \
     && echo "[ok] Codebase brief: memory/architecture/codebase_briefs/${SIDE_PROJECT_NAME}.md" \
     || echo "[warn] Codebase brief generation failed (continuing)"

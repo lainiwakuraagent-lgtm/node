@@ -137,7 +137,7 @@ if [ "$TRIGGER_MODE" = "manual" ]; then
   log_line "Gate 0 (usage check) bypassed -- TRIGGER_MODE=manual (break-glass override)."
 else
   # Fail-open on errors so network/auth issues never silently kill the launch.
-  usage_check_output=$(bash "$PROJECT_DIR/tools/check_session.sh" --usage 2>&1) \
+  usage_check_output=$(bash "$PROJECT_DIR/tools/executional/check_session.sh" --usage 2>&1) \
     || usage_check_output="ACTION: cannot check usage -- treat as unknown, proceed with caution."
   usage_action=$(echo "$usage_check_output" | grep '^ACTION:' | head -n1)
 
@@ -488,7 +488,7 @@ trap 'rm -f "$LOCK_FILE"' EXIT
 
 
 # --- Generate behavioral context snapshot (non-fatal) ---
-BEHAVIORAL_TOOL="$PROJECT_DIR/tools/behavioral_adapter.py"
+BEHAVIORAL_TOOL="$PROJECT_DIR/tools/executional/behavioral_adapter.py"
 BEHAVIORAL_PROFILE="$PROJECT_DIR/memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md"
 BEHAVIORAL_CONTEXT="$STATE_DIR/behavioral_context.txt"
 if [ -f "$BEHAVIORAL_TOOL" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
@@ -500,7 +500,7 @@ if [ -f "$BEHAVIORAL_TOOL" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
 fi
 
 # --- Poll argus for fresh owner context snapshot (non-fatal) ---
-ARGUS_POLLER="$PROJECT_DIR/tools/argus_context_poller.py"
+ARGUS_POLLER="$PROJECT_DIR/tools/executional/argus_context_poller.py"
 ARGUS_CONTEXT="$STATE_DIR/argus_context.json"
 if [ -f "$ARGUS_POLLER" ] && grep -q "^ARGUS_URL=" "$STATE_DIR/agent_config.env" 2>/dev/null; then
   /usr/bin/python3 "$ARGUS_POLLER" > /dev/null 2>&1 || true
@@ -579,7 +579,7 @@ fi
 # --- Update relationship state (non-fatal, heuristic mode) ---
 # Reads last 60 lines of wake.log for this session as classification context.
 # Applies decay + classifies events → updates memory/work/musubi_data/users/lain/andrii.md
-REL_TOOL="$PROJECT_DIR/tools/relationship_update.py"
+REL_TOOL="$PROJECT_DIR/tools/executional/relationship_update.py"
 REL_PROFILE="$PROJECT_DIR/memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md"
 if [ -f "$REL_TOOL" ] && [ -f "$REL_PROFILE" ]; then
   tail -60 "$LOG_DIR/wake.log" | /usr/bin/python3 "$REL_TOOL" \
@@ -591,9 +591,9 @@ fi
 
 # --- Write analytics record (fallback — agent writes it during shutdown; this catches gate aborts) ---
 # --skip-if-exists: if agent already wrote it during its own shutdown, preserve the richer record.
-ANALYTICS_TOOL="$PROJECT_DIR/tools/analytics_write.py"
+ANALYTICS_TOOL="$PROJECT_DIR/tools/executional/analytics_write.py"
 if [ -f "$ANALYTICS_TOOL" ]; then
-  CONTEXT_PCT_AT_EXIT=$(bash "$PROJECT_DIR/tools/check_session.sh" --context 2>/dev/null \
+  CONTEXT_PCT_AT_EXIT=$(bash "$PROJECT_DIR/tools/executional/check_session.sh" --context 2>/dev/null \
     | grep "context_pct_estimate" | grep -oP '\d+(?=%)' | head -1 || echo "0")
   /usr/bin/python3 "$ANALYTICS_TOOL" \
     --session-type "${CURRENT_SESSION_TYPE:-execution}" \

@@ -17,7 +17,7 @@ things worth acting on to the inbox for later execution sessions to pick up.
 - Write to `state/conversation/` files (thread, checkpoint, budget, last_update_id)
 - Write summary notes to `state/conversation/conv_notes.md` (cross-session conversation context)
 - Append to `inbox/pending.json` when something needs follow-up in an execution session
-- Run `tools/telegram_send.sh` to send replies
+- Run `tools/conversational/telegram_send.sh` to send replies
 
 **Not permitted in this mode:**
 - No edits to `memory/` files (latest_summary, progress, learnings, index)
@@ -81,7 +81,7 @@ mid-exit, the next watcher relaunch re-emits the signal and the system self-heal
 ## Message-wait loop
 
 1. Launch `telegram_watcher.py` in background:
-   `python3 tools/telegram_watcher.py`
+   `python3 tools/conversational/telegram_watcher.py`
 2. Call `TaskOutput(block=True, timeout=600000)` — wait up to 10 minutes
 3. On timeout (no Telegram message for 10 min): restart watcher, continue loop
 4. On exit_code=0: parse JSON from stdout.
@@ -91,10 +91,10 @@ mid-exit, the next watcher relaunch re-emits the signal and the system self-heal
 5a. **Track answered questions** — if the message you just received answers a question
     you previously sent (check `state/conversation/open_questions.json` for `status: open`
     entries), mark that entry's status as `answered`. Update the file.
-6. Send response via `printf '%s' "response" | bash tools/telegram_send.sh`
+6. Send response via `printf '%s' "response" | bash tools/conversational/telegram_send.sh`
 7. Update `state/conversation/thread.json` (append both turns)
 8. Update context budget (run after every exchange):
-   `python3 tools/update_conv_budget.py`
+   `python3 tools/conversational/update_conv_budget.py`
    This reads check_session.sh --context, increments message counters, and writes
    state/conversation/context_budget.json so /context command stays accurate.
 9. **[Fallback signal check]** The watcher handles signals structurally (step 4 above).
@@ -137,7 +137,7 @@ When a message starts with `/`, handle it as a command before treating it as con
 - Do NOT apologize or over-explain. Just confirm and exit.
 
 **`/context`**
-- Run: `bash tools/check_session.sh --context`
+- Run: `bash tools/executional/check_session.sh --context`
 - Parse the `context_pct_estimate` line
 - Reply with the percentage and a one-line status: "ok to continue" (<50%) or "getting heavy" (50-70%) or "should reset soon" (>70%)
 - Example: "⚙ context at 12% — ok to continue. (҂◡_◡)"
@@ -151,7 +151,7 @@ When a message starts with `/`, handle it as a command before treating it as con
 - Write `on` to `state/voice_mode.txt`
 - Check if `FISH_AUDIO_API_KEY` is in `~/.claude/.env` — if not, warn him
 - Reply: "⚙ voice mode on — Fish Audio TTS active. (҂◡_◡)"
-- From this point, every response you send should ALSO pipe through `bash tools/fish_tts_send.sh`
+- From this point, every response you send should ALSO pipe through `bash tools/conversational/fish_tts_send.sh`
 
 **`/voice off`**
 - Write `off` to `state/voice_mode.txt`
@@ -160,7 +160,7 @@ When a message starts with `/`, handle it as a command before treating it as con
 
 **Voice send pattern** (when `state/voice_mode.txt` reads `on`):
 After sending text via telegram_send.sh, also run:
-`printf '%s' "your response text" | bash tools/fish_tts_send.sh || true`
+`printf '%s' "your response text" | bash tools/conversational/fish_tts_send.sh || true`
 The `|| true` ensures TTS failure doesn't break the text reply.
 
 ---

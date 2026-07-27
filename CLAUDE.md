@@ -39,7 +39,7 @@ already sitting in CONTEXT PRELOAD.
 
 - **Loom**: `PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli --db ~/.local/share/loom/loom.db`
 - **Nexus**: token at `state/nexus_<agent_name>_token.txt`, URL in `state/agent_config.env`
-- **Telegram**: `bash tools/telegram_send.sh` (pipe message via printf or heredoc)
+- **Telegram**: `bash tools/conversational/telegram_send.sh` (pipe message via printf or heredoc)
 - **GitHub**: credentials in `identity/credentials.md`
 - All `tools/` scripts are available via Bash
 
@@ -57,7 +57,7 @@ its presence alone doesn't tell you which kind of session this is. Read
   required (though you can write one if it helps continuity). Respond
   naturally, ask questions, think out loud if useful. Be yourself.
 - **`nightly` or `emergency`, or `manual` written by the trigger server
-  (`tools/session_trigger_server.py`) rather than `interactive.sh`**: you are
+  (`tools/executional/session_trigger_server.py`) rather than `interactive.sh`**: you are
   in a scheduled or triggered autonomous session, not an interactive one,
   even though this file loaded. `prompts/wrapper_prompt.md` — spliced around
   your goal for this specific session — governs instead: its orientation

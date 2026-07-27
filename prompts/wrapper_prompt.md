@@ -25,7 +25,7 @@ Run these in order, every single wake, before touching the goal:
      the time yourself. Work until context limits or the session ends naturally.
    - **emergency:** Urgent work outside normal windows. No time constraints.
    - **manual:** The owner triggered you directly. No time constraints.
-2. `bash tools/check_session.sh --context`
+2. `bash tools/executional/check_session.sh --context`
    Reports your estimated context window usage so far, as a percentage.
    Also note how long you have been running:
    `echo $(( ($(date +%s) - $(cat state/session_start_epoch)) / 60 )) minutes elapsed`
@@ -131,7 +131,7 @@ Run these in order, every single wake, before touching the goal:
      Source of truth: `~/.local/share/loom/loom.db` — goals table.
      Quick view: run `PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli goal list --all`
      Active goal is in `state/loom_context.json` (generated each wake).
-     Switch goals: `bash tools/goal_switch.sh <goal_id>`
+     Switch goals: `bash tools/executional/goal_switch.sh <goal_id>`
 
 **Stop immediately, write a short note to the log, and exit (do not touch
 the goal) if any of these are true:**
@@ -214,8 +214,8 @@ context limit), you must write the following — in this order:
 
 7. **Write analytics record** to `logs/analytics.db`:
    ```
-   CONTEXT_PCT=$(bash tools/check_session.sh --context 2>/dev/null | grep "context_pct_estimate" | grep -oP '\d+(?=%)')
-   /usr/bin/python3 tools/analytics_write.py \
+   CONTEXT_PCT=$(bash tools/executional/check_session.sh --context 2>/dev/null | grep "context_pct_estimate" | grep -oP '\d+(?=%)')
+   /usr/bin/python3 tools/executional/analytics_write.py \
      --session-type <free|execution|planning> \
      --exit-reason <natural_stop|time_limit|context_limit> \
      --summary "one-line summary" \
@@ -227,7 +227,7 @@ context limit), you must write the following — in this order:
 
 7a. **Notify on major task completions** (T194 — non-optional for execution sessions):
    ```
-   /usr/bin/python3 tools/notify_task_complete.py --min-priority 7 2>/dev/null || true
+   /usr/bin/python3 tools/executional/notify_task_complete.py --min-priority 7 2>/dev/null || true
    ```
    Checks for tasks with priority>=7 marked done this session. Writes outbox entry if
    CONV_ACTIVE=0. Skips silently if conversational session is live (it handles comms).
@@ -239,17 +239,17 @@ context limit), you must write the following — in this order:
    SESSION_DATE=$(date +%Y-%m-%d)
    SESSION_N=$(ls state/reports/${SESSION_DATE}_*.md 2>/dev/null | wc -l)
    SESSION_N=$((SESSION_N + 1))
-   /usr/bin/python3 tools/session_report.py \
+   /usr/bin/python3 tools/executional/session_report.py \
      --sessions 1 \
      --output "state/reports/${SESSION_DATE}_${SESSION_N}.md" 2>/dev/null || true
    # Also refresh the canonical latest report (what /report session reads by default)
-   /usr/bin/python3 tools/session_report.py --sessions 3 2>/dev/null || true
+   /usr/bin/python3 tools/executional/session_report.py --sessions 3 2>/dev/null || true
    ```
    Non-fatal — if it fails, continue. But it rarely fails (stdlib only).
 
 8a. **Archive session report to FTS search index** (Goal 9 T68 — non-optional after step 8):
    ```
-   /usr/bin/python3 tools/report_archive.py index 2>/dev/null || true
+   /usr/bin/python3 tools/executional/report_archive.py index 2>/dev/null || true
    ```
    This indexes any new .md files from state/reports/ into state/report_archive.db for FTS search.
    Non-fatal. Enables `/report search QUERY` across all historical reports.

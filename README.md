@@ -44,7 +44,7 @@ PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
   --db ~/.local/share/loom/loom.db goal add -n "..." -d "..." --status scheduled
 # wake.sh resolves whichever goal has the highest priority among
 # scheduled/in_progress goals automatically -- no activation step needed for
-# a single goal. See tools/goal_switch.sh to switch which goal is active
+# a single goal. See tools/executional/goal_switch.sh to switch which goal is active
 # once you have more than one.
 
 # 4. Configure environment
@@ -76,7 +76,7 @@ systemctl --user enable --now "night-agent@$(basename "$PWD").timer"
 
 # The same @-instance pattern applies to emergency-agent@, conv-watchdog@,
 # and conversation@ units (scripts/*.service, scripts/*.timer) -- see
-# tools/emergency_mode.sh for how the emergency timer is installed
+# tools/executional/emergency_mode.sh for how the emergency timer is installed
 # dynamically, and the Telegram section below for the conversational layer.
 
 # 7. Initialize state
@@ -123,25 +123,38 @@ node/
 │   ├── resolve_session_type.py      # Session type dispatcher
 │   └── splice_prompt.py             # Prompt construction utility
 ├── tools/
-│   ├── check_session.sh             # Unified: --time / --context / --usage checks
-│   ├── check_replies.sh             # Read incoming messages (reply.txt + Telegram)
-│   ├── emergency_mode.sh            # Toggle emergency timer (on|off)
-│   ├── session_trigger_server.py    # HTTP server for manual triggers
-│   ├── telegram_send.sh             # Send Telegram message to owner
-│   ├── telegram_check.sh            # Check Telegram for new messages
-│   ├── telegram_watcher.py          # Telegram long-poll watcher (conversational mode)
-│   ├── command_dispatcher.py        # Handle /commands from owner via Telegram
-│   ├── relationship_update.py       # Update trust/warmth/friction from session log
-│   ├── behavioral_adapter.py        # Generate behavioral context flags
-│   ├── goal_switch.sh               # Switch active Loom goal
-│   ├── owner_brief.py               # Generate briefing for returning owner
-│   ├── session_digest.py            # Summarize sessions across a date range
-│   ├── analytics_write.py           # Write session analytics to analytics.db
-│   ├── session_report.py            # Generate session reports for /report command
-│   ├── inbox.py                     # Inbox tool (startup|read|append|prune)
-│   ├── outbox.py                    # Outbox tool (send|drain|check)
-│   ├── wonder_module.py             # Philosophy session exploration tool
-│   └── ...                          # More in tools/
+│   ├── inbox.py                     # Inbox tool (startup|read|append|prune) — cross-layer seam
+│   ├── outbox.py                    # Outbox tool (send|drain|check) — cross-layer seam
+│   ├── nexus_watcher.py             # Nexus message polling — cross-agent seam
+│   ├── conversational/              # Owned by conversation.sh / voice_conversation.sh
+│   │   ├── telegram_send.sh         # Send Telegram message to owner
+│   │   ├── telegram_check.sh        # Check Telegram for new messages
+│   │   ├── telegram_watcher.py      # Telegram long-poll watcher
+│   │   ├── telegram_webhook_handler.py # Webhook-mode receiver
+│   │   ├── command_dispatcher.py    # Handle /commands from owner via Telegram
+│   │   ├── check_replies.sh         # Read incoming messages
+│   │   ├── check_conv_status.sh     # Report conversation layer health
+│   │   ├── update_conv_budget.py    # Update context budget counters
+│   │   ├── home_stt.py              # Speech-to-text (Whisper local or API)
+│   │   ├── home_record.py           # Microphone capture
+│   │   ├── wake_word_listener.py    # Wake-word detection
+│   │   ├── tts_send.sh              # ElevenLabs TTS → Telegram voice note
+│   │   ├── fish_tts_send.sh         # Fish Audio TTS
+│   │   └── recap_generator.py       # Catch-up recap for conversation sessions
+│   └── executional/                 # Owned by wake.sh / session wrapper
+│       ├── check_session.sh         # Unified: --time / --context / --usage checks
+│       ├── health_check.sh          # Structural sanity sweep
+│       ├── emergency_mode.sh        # Toggle emergency timer (on|off)
+│       ├── session_trigger_server.py# HTTP server for manual triggers
+│       ├── relationship_update.py   # Update trust/warmth/friction from session log
+│       ├── behavioral_adapter.py    # Generate behavioral context flags
+│       ├── goal_switch.sh           # Switch active Loom goal
+│       ├── owner_brief.py           # Generate briefing for returning owner
+│       ├── session_digest.py        # Summarize sessions across a date range
+│       ├── analytics_write.py       # Write session analytics to analytics.db
+│       ├── session_report.py        # Generate session reports for /report command
+│       ├── wonder_module.py         # Philosophy session exploration tool
+│       └── ...                      # More in tools/executional/
 ├── prompts/
 │   ├── wrapper_prompt.md            # Session wrapper (orientation, shutdown, memory)
 │   ├── persona.txt                  # Agent persona (YOU fill this in)
@@ -188,8 +201,8 @@ TELEGRAM_ALLOWED_USERS=<your numeric chat id>
 ```
 
 Once configured, the agent can:
-- Send you status updates and task completion pings via `telegram_send.sh`
-- Respond to `/commands` like `/status`, `/log`, `/goal`, `/report` via `command_dispatcher.py`
+- Send you status updates and task completion pings via `tools/conversational/telegram_send.sh`
+- Respond to `/commands` like `/status`, `/log`, `/goal`, `/report` via `tools/conversational/command_dispatcher.py`
 - Enter a real-time conversational mode via `scripts/conversation.sh`, run continuously as a
   systemd instance service:
   ```bash
@@ -205,8 +218,8 @@ Once configured, the agent can:
 The relationship engine tracks `Trust`, `Warmth`, and `Friction` with the owner
 over time, and adjusts the agent's tone accordingly each session.
 
-- `tools/relationship_update.py` — updates axes from session log + heuristics
-- `tools/behavioral_adapter.py` — generates `state/behavioral_context.txt`
+- `tools/executional/relationship_update.py` — updates axes from session log + heuristics
+- `tools/executional/behavioral_adapter.py` — generates `state/behavioral_context.txt`
 - `wake.sh` runs both automatically post-session
 
 To disable: comment out the relevant lines in `wake.sh`.
