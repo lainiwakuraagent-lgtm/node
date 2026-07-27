@@ -20,7 +20,10 @@ write outputs that exist after you are gone.
 2. Read `memory/progress.md` for the next action if loom_context doesn't clarify it.
 3. Work the task completely — don't stop halfway because it's getting complex.
 4. After each completed task: re-check time and context before continuing.
-5. If both are within bounds, pull the next task and continue.
+5. If both are within bounds AND you have completed fewer than `EXECUTION_TASK_CAP` tasks
+   this session (default: 2): pull the next task and continue.
+   If you have completed `EXECUTION_TASK_CAP` or more tasks this session, stop regardless of
+   queue state — write your handoff and exit with reason `task_cap_reached`.
 
 ## What "done" means for a task
 

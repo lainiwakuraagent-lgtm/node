@@ -10,7 +10,7 @@ Usage:
 
   --session-key KEY       Session key, e.g. 2026-07-10_1 (auto-derived if omitted)
   --session-type TYPE     execution | planning | free (required)
-  --exit-reason REASON    time_limit | context_limit | natural_stop | gate_abort
+  --exit-reason REASON    time_limit | context_limit | natural_stop | gate_abort | task_cap_reached
   --summary TEXT          One-line session summary
   --handoff TEXT          Next action note
   --tasks-completed N     Number of Loom tasks completed this session (default: 0)
@@ -490,7 +490,7 @@ def main():
                         help="Session type (default: $CURRENT_SESSION_TYPE or 'execution'). "
                              "Accepted: " + ", ".join(_session_type_choices))
     parser.add_argument("--exit-reason", default="natural_stop",
-                        choices=["time_limit", "context_limit", "natural_stop", "gate_abort"],
+                        choices=["time_limit", "context_limit", "natural_stop", "gate_abort", "task_cap_reached"],
                         help="Why the session ended")
     parser.add_argument("--summary", default="", help="One-line summary")
     parser.add_argument("--handoff", default="", help="Next action note")

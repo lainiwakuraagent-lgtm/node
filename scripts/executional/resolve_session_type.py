@@ -274,7 +274,7 @@ def _check_queue_state(conn: sqlite3.Connection) -> tuple:
     try:
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         candidates = conn.execute(
-            "SELECT id, name, depends FROM tasks "
+            "SELECT id, name, depends, project_id, goal_id FROM tasks "
             "WHERE status = 'scheduled' "
             "AND (blocked_reason IS NULL OR blocked_reason = '') "
             "AND (wait_until IS NULL OR wait_until <= ?) "
@@ -303,8 +303,25 @@ def _check_queue_state(conn: sqlite3.Connection) -> tuple:
                     if undone > 0:
                         continue
             ready.append(row)
+
+        # A1: scope filter — limit to same project_id bucket as the top task.
+        # If top task has project_id set: keep only matching project_id.
+        # If top task has project_id=None: keep only project_id IS NULL under the same goal_id.
+        if len(ready) > 1:
+            top = ready[0]
+            top_project = top["project_id"]
+            top_goal = top["goal_id"]
+            if top_project is not None:
+                ready = [r for r in ready if r["project_id"] == top_project]
+            else:
+                ready = [r for r in ready if r["project_id"] is None and r["goal_id"] == top_goal]
+
+        # A2: count cap — expose at most EXECUTION_TASK_CAP tasks per session.
+        task_cap = int(os.environ.get("EXECUTION_TASK_CAP", "2"))
+        ready = ready[:task_cap]
+
         if ready:
-            names = ", ".join(r["name"] for r in ready[:3])
+            names = ", ".join(r["name"] for r in ready)
             return ("execution", f"{len(ready)} scheduled task(s) ready: {names}",
                     {"level": "task", "id": ready[0]["id"]})
     except sqlite3.Error:
