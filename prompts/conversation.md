@@ -59,13 +59,34 @@ Then start the message-wait loop below.
 
 ---
 
+## Signal handling
+
+State-transition signals arrive as watcher output when `state/conversation/reset_signal.txt`
+exists. The watcher checks the file at the top of every poll cycle (~25s frequency) and emits
+`{"event": "signal", "action": ...}` instead of polling for Telegram messages. When TaskOutput
+returns with `event: "signal"`, **handle it immediately — before any response**.
+
+| `action` | What to do |
+|---|---|
+| `maintenance_close` | Write `checkpoint.json` (mark as 4AM maintenance close). Delete `reset_signal.txt`. Write `maintenance_close` to `exit_reason.txt`. Exit 0. |
+| `idle_close` | Write `checkpoint.json`. Delete `reset_signal.txt`. Write `idle_close` to `exit_reason.txt`. Exit 0. |
+| `reset` or `new` | Write `checkpoint.json`. Delete `reset_signal.txt`. Write the action to `exit_reason.txt`. Exit 0. |
+| `unknown` | Log to `wake.log`. Delete `reset_signal.txt`. Continue the loop. |
+
+Note: Write `checkpoint.json` BEFORE deleting `reset_signal.txt`. If the process crashes
+mid-exit, the next watcher relaunch re-emits the signal and the system self-heals.
+
+---
+
 ## Message-wait loop
 
 1. Launch `telegram_watcher.py` in background:
    `python3 tools/telegram_watcher.py`
 2. Call `TaskOutput(block=True, timeout=600000)` — wait up to 10 minutes
 3. On timeout (no Telegram message for 10 min): restart watcher, continue loop
-4. On exit_code=0: parse JSON from stdout → Telegram message received
+4. On exit_code=0: parse JSON from stdout.
+   - If `event` field is `"signal"`: go to Signal handling above. Stop here.
+   - If `event` is `"telegram_message"` (or no `event` field): Telegram message received. Proceed to step 5.
 5. Read the message. Think. Respond.
 5a. **Track answered questions** — if the message you just received answers a question
     you previously sent (check `state/conversation/open_questions.json` for `status: open`
@@ -76,18 +97,10 @@ Then start the message-wait loop below.
    `python3 tools/update_conv_budget.py`
    This reads check_session.sh --context, increments message counters, and writes
    state/conversation/context_budget.json so /context command stays accurate.
-9. **Check for signals** — on EVERY wakeup (message received OR timeout), check:
-    - Read `state/conversation/reset_signal.txt` if it exists
-    - If `action` is `idle_close`:
-      0. Write `state/conversation/checkpoint.json` (same format as context-full exit: brief 3-5 line summary)
-      1. Delete `reset_signal.txt` (consume the signal)
-      2. Write `idle_close` to `state/conversation/exit_reason.txt`
-      3. Exit 0
-    - If `action` is `reset` or `new`:
-      1. Write checkpoint.json
-      2. Delete reset_signal.txt
-      3. Write `reset` or `new` to `state/conversation/exit_reason.txt`
-      4. Exit 0
+9. **[Fallback signal check]** The watcher handles signals structurally (step 4 above).
+    This step is a belt-and-suspenders check for edge cases (watcher crash, signal written
+    between poll cycles). If `state/conversation/reset_signal.txt` exists at this point:
+    handle it per the Signal handling section above. This should rarely fire.
 10. If context >= 70%: write checkpoint, write `context_full` to `state/conversation/exit_reason.txt`, exit 0 (conversation.sh will restart)
 11. Else: loop from step 1
 

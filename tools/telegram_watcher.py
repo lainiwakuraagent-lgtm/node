@@ -367,6 +367,30 @@ def main() -> int:
     offset = load_last_update_id()
 
     while True:
+        # --- STATE-TRANSITION SIGNAL CHECK ---
+        # Runs before every poll cycle. Structural guarantee: the agent cannot
+        # receive a Telegram message without the watcher having first checked for
+        # signals. Detection happens in deterministic Python, not LLM attention.
+        # The watcher does NOT delete the signal file — only the agent does, after
+        # writing checkpoint.json. This keeps signal delivery idempotent: if the
+        # agent crashes mid-exit, the next watcher relaunch re-emits the signal.
+        _signal_file = PROJECT_DIR / "state" / "conversation" / "reset_signal.txt"
+        if _signal_file.exists():
+            try:
+                _sig_data = json.loads(_signal_file.read_text().strip())
+                _sig_out = {
+                    "event": "signal",
+                    "action": _sig_data.get("action", "unknown"),
+                    "reason": _sig_data.get("reason", ""),
+                    "ts": _sig_data.get("ts", ""),
+                }
+                print(json.dumps(_sig_out))
+                remove_pid()
+                return 0
+            except (json.JSONDecodeError, OSError) as _e:
+                # Corrupt signal file — log and continue polling (don't crash).
+                print(f"WARN: signal file unreadable: {_e}", file=sys.stderr)
+        # --- END SIGNAL CHECK ---
         try:
             updates = get_updates(token, offset)
         except KeyboardInterrupt:
@@ -413,6 +437,7 @@ def main() -> int:
 
             # Found a message for us — print and exit
             out = {
+                "event": "telegram_message",
                 "update_id": update_id,
                 "message_id": msg.get("message_id"),
                 "chat_id": chat_id,
