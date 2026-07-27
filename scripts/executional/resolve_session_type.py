@@ -356,6 +356,16 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
         return reflection_type, "window_type", "", None
     # window_type == "work" or unset: fall through to queue-state logic
 
+    # Priority 2.5: Philosophy cap gate — must run BEFORE queue-state check.
+    # See agent_project's resolve_session_type.py for detailed rationale.
+    # Short version: philosophy_blocker-created tasks must not immediately
+    # trigger execution and reset the consecutive counter, bypassing the cap.
+    default_goal_id = _read_default_goal_id(project_dir)
+    _cap_target = {"level": "goal", "id": default_goal_id} if default_goal_id else None
+    consec = _read_consecutive_philosophy_count(project_dir)
+    if consec >= 3:
+        return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached", _cap_target
+
     # Priority 3: Queue state from Loom DB
     queue_type, queue_reason, target = resolve_from_queue_state(db_path)
     if queue_type:
@@ -382,12 +392,9 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
     # or audited), so it must resolve here even if its status is desire or
     # anything else. philosophy_cap aborts before consuming target_context
     # anyway, so attaching it there too is harmless.
-    default_goal_id = _read_default_goal_id(project_dir)
-    target = {"level": "goal", "id": default_goal_id} if default_goal_id else None
+    target = _cap_target  # reuse — already computed above
 
-    consec = _read_consecutive_philosophy_count(project_dir)
-    if consec >= 3:
-        return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached", target
+    # consec already read above; consec >= 3 case already returned.
     if consec == 2:
         return "blocker_resolver", "default", f"consecutive_philosophy_count={consec}, blocker review mode", target
     if consec == 1:

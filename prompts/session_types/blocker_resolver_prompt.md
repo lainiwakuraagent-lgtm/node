@@ -40,6 +40,11 @@ Even if the full task is genuinely blocked, there may be preparation,
 design, scaffolding, or research that could happen now.
 If yes: create that sub-task in Loom and mark it scheduled.
 
+**Constraint:** Create at most ONE sub-task this session. If you've already
+created a task, stop. Additional tasks can wait for the next execution window.
+Self-manufactured busywork to avoid the philosophy_cap is not useful — if there
+is genuinely nothing to unblock, say so clearly and let the cap fire.
+
 **5. Should this task even exist in its current form?**
 Some blocked tasks persist because no one questioned whether they should.
 If the block has been sitting for weeks and the rationale feels thin — say so.
