@@ -136,19 +136,51 @@ kill_stale_watcher() {
 
         rm -f "$WATCHER_PID_FILE"
     fi
-    # Use /proc/<pid>/comm to filter out claude processes whose -p prompt text contains
-    # "telegram_watcher.py" as a string — only kill actual python3 processes.
+    # Kill remaining telegram_watcher.py orphans — python3 watchers AND bash wrappers
+    # (run_in_background survivors from prior sessions). Skip claude processes whose
+    # -p prompt text may contain "telegram_watcher.py" (comm is "claude", not bash/python).
     local _killed_stray=0
     while IFS= read -r stray_pid; do
         stray_comm=$(cat "/proc/$stray_pid/comm" 2>/dev/null || echo "")
         if [[ "$stray_comm" == python* ]]; then
-            log_line "CONV: pkill fallback — killing stray watcher PID $stray_pid (comm: $stray_comm)."
+            log_line "CONV: pkill fallback — killing stray watcher python PID $stray_pid."
             kill "$stray_pid" 2>/dev/null || true
             _killed_stray=1
+        elif [[ "$stray_comm" == "bash" ]]; then
+            stray_cmd=$(tr '\0' ' ' < "/proc/$stray_pid/cmdline" 2>/dev/null || echo "")
+            if [[ "$stray_cmd" == *telegram_watcher* ]]; then
+                log_line "CONV: pkill fallback — killing stray watcher bash wrapper PID $stray_pid."
+                kill "$stray_pid" 2>/dev/null || true
+                _killed_stray=1
+            fi
         fi
     done < <(pgrep -f "telegram_watcher.py" 2>/dev/null || true)
     [ "$_killed_stray" = "1" ] && sleep 1
 }
+
+# One-time startup sweep: kill any telegram_watcher orphans from prior conversation.sh runs.
+# Handles the case where a bash wrapper (spawned via run_in_background by a prior session)
+# outlived its session's exit. The per-loop kill_stale_watcher can miss these if the bash
+# wrapper hasn't yet spawned its python3 child by the time pgrep runs. This sweep fires
+# before the main loop, giving us the cleanest possible starting state.
+log_line "CONV: startup — sweeping for pre-session watcher orphans."
+_sw_killed=0
+while IFS= read -r _sw_pid; do
+    _sw_comm=$(cat "/proc/$_sw_pid/comm" 2>/dev/null || echo "")
+    if [[ "$_sw_comm" == python* ]]; then
+        log_line "CONV: startup sweep — killing stale watcher python PID $_sw_pid."
+        kill "$_sw_pid" 2>/dev/null || true
+        _sw_killed=1
+    elif [[ "$_sw_comm" == "bash" ]]; then
+        _sw_cmd=$(tr '\0' ' ' < "/proc/$_sw_pid/cmdline" 2>/dev/null || echo "")
+        if [[ "$_sw_cmd" == *telegram_watcher* ]]; then
+            log_line "CONV: startup sweep — killing stale watcher bash wrapper PID $_sw_pid."
+            kill "$_sw_pid" 2>/dev/null || true
+            _sw_killed=1
+        fi
+    fi
+done < <(pgrep -f "telegram_watcher.py" 2>/dev/null || true)
+[ "$_sw_killed" = "1" ] && sleep 1
 
 # --- Auto-restart loop ---
 RESTART_COUNT=0
