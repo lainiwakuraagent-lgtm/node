@@ -148,22 +148,55 @@ def write_pid() -> None:
     # Kill previous instance if running — prevents 409 Conflict on getUpdates
     if WATCHER_PID_FILE.exists():
         try:
-            old_pid = int(WATCHER_PID_FILE.read_text().strip())
-            # Also kill the bash wrapper (parent) — it lingers when python3 is in a long-poll.
+            old_content = WATCHER_PID_FILE.read_text().strip()
+            # Support both "pid" (old) and "pid:wrapper_pid" (new) formats
+            if ':' in old_content:
+                old_watcher_str, old_wrapper_str = old_content.split(':', 1)
+                old_pid = int(old_watcher_str)
+                file_wrapper_pid = int(old_wrapper_str) if old_wrapper_str.isdigit() else 0
+            else:
+                old_pid = int(old_content)
+                file_wrapper_pid = 0
+
+            # Kill stored wrapper first — works even when watcher already exited and
+            # removed the PID file on its own (the main orphan-recurrence root cause).
+            if file_wrapper_pid > 1:
+                try:
+                    os.kill(file_wrapper_pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+            # Also discover wrapper via ps if watcher is still alive
             try:
                 ppid_out = subprocess.check_output(
                     ["ps", "-o", "ppid=", "-p", str(old_pid)], stderr=subprocess.DEVNULL
                 )
-                wrapper_pid = int(ppid_out.strip())
-                if wrapper_pid > 1:
-                    os.kill(wrapper_pid, signal.SIGTERM)
+                live_wrapper_pid = int(ppid_out.strip())
+                if live_wrapper_pid > 1 and live_wrapper_pid != file_wrapper_pid:
+                    os.kill(live_wrapper_pid, signal.SIGTERM)
             except Exception:
                 pass
-            os.kill(old_pid, signal.SIGTERM)
+
+            # Kill the watcher itself
+            try:
+                os.kill(old_pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
             time.sleep(0.5)  # let it die before we take over
         except (ValueError, ProcessLookupError, PermissionError):
             pass
-    WATCHER_PID_FILE.write_text(str(os.getpid()))
+
+    # Write new PID with parent (bash wrapper) PID so kill_stale_watcher can find it
+    # even if this process exits cleanly before the bash wrapper does.
+    my_pid = os.getpid()
+    try:
+        ppid_out = subprocess.check_output(
+            ["ps", "-o", "ppid=", "-p", str(my_pid)], stderr=subprocess.DEVNULL
+        )
+        my_wrapper_pid = int(ppid_out.strip())
+    except Exception:
+        my_wrapper_pid = 0
+    WATCHER_PID_FILE.write_text(f"{my_pid}:{my_wrapper_pid}")
 
 
 def remove_pid() -> None:
@@ -385,7 +418,6 @@ def main() -> int:
                     "ts": _sig_data.get("ts", ""),
                 }
                 print(json.dumps(_sig_out))
-                remove_pid()
                 return 0
             except (json.JSONDecodeError, OSError) as _e:
                 # Corrupt signal file — log and continue polling (don't crash).
@@ -446,7 +478,6 @@ def main() -> int:
                 "date": msg.get("date", 0),
             }
             print(json.dumps(out))
-            remove_pid()
             return 0
 
         # Check outbox for pending execution-layer messages to forward
