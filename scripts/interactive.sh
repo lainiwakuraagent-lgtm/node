@@ -2,7 +2,13 @@
 # interactive.sh — Launch an interactive Claude Code session with full agent context.
 #
 # Usage (from project root or any directory):
-#   bash scripts/interactive.sh
+#   bash scripts/interactive.sh [--project /path/to/side/project]
+#
+# Options:
+#   --project <path>   Work on a side project instead of the agent's own project.
+#                      Generates a codebase brief, then launches Claude with
+#                      the side project as the working directory. Agent memory
+#                      (state/, memory/) remains accessible via --add-dir.
 #
 # What it does:
 #   1. Refreshes Loom context snapshot
@@ -18,6 +24,20 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
+
+# --- Parse arguments ---
+SIDE_PROJECT=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --project)
+      SIDE_PROJECT="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 
 # --- Load agent config ---
 AGENT_CONFIG="state/agent_config.env"
@@ -86,6 +106,60 @@ fi
 
 # --- Write trigger mode ---
 echo "manual" > state/trigger_mode.txt
+
+# --- Side project setup ---
+if [ -n "$SIDE_PROJECT" ]; then
+  SIDE_PROJECT="$(realpath "$SIDE_PROJECT")"
+  if [ ! -d "$SIDE_PROJECT" ]; then
+    echo "[error] --project path does not exist: $SIDE_PROJECT"
+    exit 1
+  fi
+  SIDE_PROJECT_NAME="$(basename "$SIDE_PROJECT")"
+
+  echo ""
+  echo "=== Side project: ${SIDE_PROJECT_NAME} ==="
+  echo "Path   : ${SIDE_PROJECT}"
+  echo ""
+
+  # Generate/refresh codebase brief (non-fatal)
+  BRIEF_DIR="${PROJECT_DIR}/memory/architecture/codebase_briefs"
+  mkdir -p "$BRIEF_DIR"
+  /usr/bin/python3 "${PROJECT_DIR}/tools/codebase_indexer.py" "$SIDE_PROJECT" \
+    --output "${BRIEF_DIR}/${SIDE_PROJECT_NAME}.md" > /dev/null 2>&1 \
+    && echo "[ok] Codebase brief: memory/architecture/codebase_briefs/${SIDE_PROJECT_NAME}.md" \
+    || echo "[warn] Codebase brief generation failed (continuing)"
+
+  # Track active project path (cleared on exit)
+  echo "$SIDE_PROJECT" > "${PROJECT_DIR}/state/active_project_path.txt"
+  # shellcheck disable=SC2064
+  trap "rm -f '${PROJECT_DIR}/state/active_project_path.txt'" EXIT
+
+  # Change to side project directory so Claude's cwd and CLAUDE.md discovery
+  # point at the right place.
+  cd "$SIDE_PROJECT"
+
+  echo ""
+  echo "Launching in: ${SIDE_PROJECT}"
+  echo "(agent project accessible via --add-dir for memory/state writes)"
+  echo ""
+
+  # Persona injected via --append-system-prompt so identity carries over
+  # even though the agent project's CLAUDE.md is not in the new cwd.
+  PERSONA_FILE="${PROJECT_DIR}/prompts/persona.txt"
+  PERSONA_CONTENT=""
+  if [ -f "$PERSONA_FILE" ]; then
+    PERSONA_CONTENT="$(cat "$PERSONA_FILE")"
+  fi
+
+  if [ -n "$PERSONA_CONTENT" ]; then
+    exec claude --model "${NODE_VERSION}" \
+      --add-dir "${PROJECT_DIR}" \
+      --append-system-prompt "${PERSONA_CONTENT}"
+  else
+    exec claude --model "${NODE_VERSION}" \
+      --add-dir "${PROJECT_DIR}"
+  fi
+fi
 
 echo ""
 echo "Launching... (type /exit or Ctrl+C to quit)"
