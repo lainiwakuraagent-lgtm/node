@@ -145,15 +145,32 @@ def listen_for_wake_word(
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Listen for a wake word")
+    parser.add_argument(
+        "--max-detections", type=int, default=None,
+        help="Stop after N detections (default: run until SIGTERM/Ctrl-C)",
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=None,
+        help="Stop after N seconds (default: no timeout)",
+    )
+    args = parser.parse_args()
+
     print(
         f"[wake_word] WAKE_WORD={WAKE_WORD}  WAKE_THRESHOLD={WAKE_THRESHOLD}",
         file=sys.stderr,
     )
     try:
-        total = listen_for_wake_word()
+        total = listen_for_wake_word(
+            timeout_seconds=args.timeout,
+            max_detections=args.max_detections,
+        )
         print(f"[wake_word] Total detections: {total}")
+        sys.exit(0 if total > 0 else 1)
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2)
     except KeyboardInterrupt:
         print("\n[wake_word] Stopped.", file=sys.stderr)
