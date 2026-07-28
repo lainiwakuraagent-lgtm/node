@@ -55,6 +55,7 @@ SMOKE_TEST=0
 DRY_RUN=0
 
 BLANK_NODE_REPO="https://github.com/lainiwakuraagent-lgtm/node.git"
+LOOM_REPO="https://github.com/lainiwakuraagent-lgtm/loom.git"
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 
@@ -101,12 +102,14 @@ if [ -z "$GITHUB_PAT" ]; then
   fi
 fi
 
-# Build authenticated clone URL if PAT is available
+# Build authenticated clone URLs if PAT is available
 if [ -n "$GITHUB_PAT" ]; then
   CLONE_URL="https://lainiwakuraagent-lgtm:${GITHUB_PAT}@github.com/lainiwakuraagent-lgtm/node.git"
+  LOOM_CLONE_URL="https://lainiwakuraagent-lgtm:${GITHUB_PAT}@github.com/lainiwakuraagent-lgtm/loom.git"
 else
   CLONE_URL="$BLANK_NODE_REPO"
-  info "WARN: No --github-pat provided. Clone may fail if repo is private."
+  LOOM_CLONE_URL="$LOOM_REPO"
+  info "WARN: No --github-pat provided. Clone may fail if repos are private."
 fi
 
 SSH_OPTS="-i ${SSH_KEY} -o ConnectTimeout=15 -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
@@ -128,6 +131,7 @@ if [ "$DRY_RUN" = "1" ]; then
   [ -n "$GOAL_TXT_PATH" ] && info "Would: copy ${GOAL_TXT_PATH} → prompts/goal.txt"
   info "Would: install and enable systemd units"
   info "Would: enable linger for ${TARGET_USER}"
+  info "Would: clone loom → ~/lain/loom and create ~/.local/bin/loom wrapper"
   [ "$SMOKE_TEST" = "1" ] && info "Would: run smoke test"
   exit 0
 fi
@@ -475,9 +479,74 @@ echo "  Conversation service enabled (not started — requires Telegram credenti
 ENABLE_SCRIPT
 info "Services enabled"
 
-# ── Step 10: Smoke test ───────────────────────────────────────────────────────
+# ── Step 10: Loom setup ──────────────────────────────────────────────────────
 
-step "10: Smoke test"
+step "10: Loom setup"
+REMOTE_LOOM="${REMOTE_HOME}/lain/loom"
+# shellcheck disable=SC2086
+ssh $SSH_OPTS "${TARGET_USER}@${TARGET_HOST}" "bash -s" << LOOM_SCRIPT
+set -euo pipefail
+
+LOOM_CLONE_URL="${LOOM_CLONE_URL}"
+REMOTE_LOOM="${REMOTE_LOOM}"
+REMOTE_HOME="${REMOTE_HOME}"
+
+# ── Clone or update loom repo ────────────────────────────────────────────────
+mkdir -p "\${REMOTE_HOME}/lain"
+if [ -d "\${REMOTE_LOOM}/.git" ]; then
+  echo "  Loom repo exists — pulling latest"
+  cd "\${REMOTE_LOOM}"
+  git pull --quiet 2>&1 | sed 's/https:\/\/[^@]*@/https:\/\/[PAT]@/g'
+else
+  echo "  Cloning loom → \${REMOTE_LOOM}"
+  git clone --quiet "\${LOOM_CLONE_URL}" "\${REMOTE_LOOM}" 2>&1 | sed 's/https:\/\/[^@]*@/https:\/\/[PAT]@/g'
+fi
+echo "  Loom repo ready"
+
+# ── Create venv and install loom ─────────────────────────────────────────────
+if [ ! -f "\${REMOTE_LOOM}/.venv/bin/python" ]; then
+  echo "  Creating loom venv"
+  python3 -m venv "\${REMOTE_LOOM}/.venv"
+  "\${REMOTE_LOOM}/.venv/bin/pip" install --quiet -e "\${REMOTE_LOOM}"
+  echo "  Loom installed in venv"
+else
+  echo "  Loom venv exists — skipping reinstall"
+fi
+
+# ── Initialize per-agent loom.db directory ───────────────────────────────────
+mkdir -p "\${REMOTE_HOME}/.local/share/loom"
+echo "  Loom DB dir: \${REMOTE_HOME}/.local/share/loom/"
+
+# ── Create ~/.local/bin/loom wrapper ─────────────────────────────────────────
+mkdir -p "\${REMOTE_HOME}/.local/bin"
+cat > "\${REMOTE_HOME}/.local/bin/loom" << 'WRAPPER'
+#!/usr/bin/env bash
+# loom — Thin wrapper around the Loom task/goal CLI.
+# Bakes in PYTHONPATH and per-agent DB path so agents write:
+#   loom task list
+#   loom goal list --all
+# Override DB: LOOM_DB=/path/to/other.db loom task list
+LOOM_VENV="\${HOME}/lain/loom/.venv"
+LOOM_DB="\${LOOM_DB:-\${HOME}/.local/share/loom/loom.db}"
+exec env PYTHONPATH="\${HOME}/lain/loom" \
+  "\${LOOM_VENV}/bin/python" -m loom.cli \
+  --db "\${LOOM_DB}" "\$@"
+WRAPPER
+chmod +x "\${REMOTE_HOME}/.local/bin/loom"
+echo "  Created: \${REMOTE_HOME}/.local/bin/loom"
+
+# ── Verify ───────────────────────────────────────────────────────────────────
+if "\${REMOTE_HOME}/.local/bin/loom" --version > /dev/null 2>&1; then
+  echo "  loom wrapper verified OK"
+else
+  echo "  WARN: loom wrapper created but --version check failed (may need PATH update)"
+fi
+LOOM_SCRIPT
+info "Loom setup complete"
+
+# ── Step 11: Smoke test ───────────────────────────────────────────────────────
+
+step "11: Smoke test"
 if [ "$SMOKE_TEST" = "1" ]; then
   info "Running smoke test (TRIGGER_MODE=manual, --dry-run if available)..."
   # shellcheck disable=SC2086
