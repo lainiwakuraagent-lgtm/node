@@ -515,22 +515,66 @@ fi
 
 # ── Initialize per-agent loom.db directory ───────────────────────────────────
 mkdir -p "\${REMOTE_HOME}/.local/share/loom"
-echo "  Loom DB dir: \${REMOTE_HOME}/.local/share/loom/"
+AGENT_DB="\${REMOTE_HOME}/.local/share/loom/${AGENT_NAME}.db"
+echo "  Loom DB path: \${AGENT_DB}"
+
+# ── Add LOOM_DB to agent_config.env ──────────────────────────────────────────
+AGENT_CONFIG="\${REMOTE_HOME}/${AGENT_NAME}/state/agent_config.env"
+if [ -f "\${AGENT_CONFIG}" ]; then
+  if grep -q "^LOOM_DB=" "\${AGENT_CONFIG}"; then
+    sed -i "s|^LOOM_DB=.*|LOOM_DB=\${AGENT_DB}|" "\${AGENT_CONFIG}"
+  else
+    echo "LOOM_DB=\${AGENT_DB}" >> "\${AGENT_CONFIG}"
+  fi
+  echo "  LOOM_DB set in agent_config.env"
+fi
 
 # ── Create ~/.local/bin/loom wrapper ─────────────────────────────────────────
 mkdir -p "\${REMOTE_HOME}/.local/bin"
 cat > "\${REMOTE_HOME}/.local/bin/loom" << 'WRAPPER'
 #!/usr/bin/env bash
-# loom — Thin wrapper around the Loom task/goal CLI.
-# Bakes in PYTHONPATH and per-agent DB path so agents write:
-#   loom task list
-#   loom goal list --all
-# Override DB: LOOM_DB=/path/to/other.db loom task list
-LOOM_VENV="\${HOME}/lain/loom/.venv"
-LOOM_DB="\${LOOM_DB:-\${HOME}/.local/share/loom/loom.db}"
-exec env PYTHONPATH="\${HOME}/lain/loom" \
-  "\${LOOM_VENV}/bin/python" -m loom.cli \
-  --db "\${LOOM_DB}" "\$@"
+# loom — Thin wrapper: per-agent DB path + agent-friendly short aliases.
+# DB resolution: LOOM_DB env var > AGENT_NAME env var > generic loom.db
+#
+# Short aliases:
+#   loom ls [status]                      list tasks (default: scheduled)
+#   loom show <id>                        show task detail
+#   loom done <id>                        mark task done
+#   loom fail <id>                        mark task failed
+#   loom block <id> [owner|dep|external]  mark task blocked
+#   loom add "name" [--tags t]            add scheduled task
+#   loom next                             show priority-ordered ready queue
+
+LOOM_VENV="${HOME}/lain/loom/.venv"
+
+if [ -z "${LOOM_DB:-}" ]; then
+  if [ -n "${AGENT_NAME:-}" ]; then
+    LOOM_DB="${HOME}/.local/share/loom/${AGENT_NAME}.db"
+  else
+    LOOM_DB="${HOME}/.local/share/loom/loom.db"
+  fi
+fi
+
+_loom_cli() {
+  env PYTHONPATH="${HOME}/lain/loom" \
+    "${LOOM_VENV}/bin/python" -m loom.cli \
+    --db "${LOOM_DB}" "$@"
+}
+
+case "${1:-}" in
+  ls)   shift; _loom_cli task list --status "${1:-scheduled}" ;;
+  show) _loom_cli task show "$2" ;;
+  done) _loom_cli task edit --status done "$2" ;;
+  fail) _loom_cli task edit --status failed "$2" ;;
+  block)
+    _id="${2:?loom block requires an ID}"; _btype="${3:-owner}"
+    _loom_cli task edit --status "blocked_${_btype}" "$_id" ;;
+  add)
+    shift; _name="${1:?loom add requires a task name}"; shift
+    _loom_cli task add --name "$_name" --status scheduled "$@" ;;
+  next) _loom_cli queue ;;
+  *)    _loom_cli "$@" ;;
+esac
 WRAPPER
 chmod +x "\${REMOTE_HOME}/.local/bin/loom"
 echo "  Created: \${REMOTE_HOME}/.local/bin/loom"
