@@ -486,6 +486,17 @@ echo "$session_start_epoch" > "$STATE_DIR/session_start_epoch"
 echo $$ > "$LOCK_FILE"
 trap 'rm -f "$LOCK_FILE"' EXIT
 
+# --- Nexus heartbeat: push last_seen at session start (non-fatal, T402) ---
+_nexus_token_file="$STATE_DIR/nexus_${AGENT_NAME}_token.txt"
+if [ -f "$_nexus_token_file" ]; then
+  _hb_token=$(cat "$_nexus_token_file")
+  curl -s --max-time 5 -X POST "$NEXUS_URL/agents/${AGENT_NAME}/heartbeat" \
+    -H "Authorization: Bearer $_hb_token" \
+    -H "Content-Type: application/json" \
+    -d "{\"status\":\"session_start\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+    > /dev/null 2>&1 || true
+  log_line "Nexus heartbeat sent (non-fatal if endpoint not yet live)."
+fi
 
 # --- Generate behavioral context snapshot (non-fatal) ---
 BEHAVIORAL_TOOL="$PROJECT_DIR/tools/executional/behavioral_adapter.py"
