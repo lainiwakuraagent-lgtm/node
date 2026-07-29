@@ -122,13 +122,65 @@ def init_schema(conn):
     FROM session_tools
     GROUP BY tool_name
     ORDER BY total_calls DESC;
+
+    CREATE TABLE IF NOT EXISTS conversational_sessions (
+        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_key             TEXT UNIQUE NOT NULL,
+        channel                 TEXT NOT NULL,
+        started_at              TEXT,
+        ended_at                TEXT,
+        total_duration_minutes  INTEGER,
+        active_duration_minutes INTEGER,
+        turn_count              INTEGER,
+        input_tokens            INTEGER,
+        output_tokens           INTEGER,
+        total_tokens            INTEGER,
+        cost_usd                REAL,
+        model                   TEXT,
+        context_pct_at_close    REAL,
+        context_soft_fired      INTEGER DEFAULT 0,
+        context_hard_fired      INTEGER DEFAULT 0,
+        exit_reason             TEXT,
+        avg_wait_time_seconds   REAL,
+        spawn_sequence_number   INTEGER
+    );
     """)
-    # Migrate existing DBs: add type_resolution_source if not present
-    try:
-        conn.execute("ALTER TABLE sessions ADD COLUMN type_resolution_source TEXT")
-        conn.commit()
-    except Exception:
-        pass  # Column already exists — ignore
+    # Migrate existing DBs
+    for col_def in [
+        ("sessions", "type_resolution_source", "TEXT"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE {col_def[0]} ADD COLUMN {col_def[1]} {col_def[2]}")
+            conn.commit()
+        except Exception:
+            pass
+
+    # Create daily_cost view if not present (DROP+CREATE since views can't ALTER)
+    conn.execute("DROP VIEW IF EXISTS daily_cost")
+    conn.execute("""
+    CREATE VIEW daily_cost AS
+    SELECT
+        date(s.started_at) AS day,
+        'executional' AS layer,
+        COUNT(*) AS session_count,
+        ROUND(SUM(COALESCE(c.cost_usd, 0)), 6) AS cost_usd,
+        SUM(COALESCE(c.total_tokens, 0)) AS total_tokens
+    FROM sessions s
+    LEFT JOIN session_costs c ON c.session_id = s.id
+    WHERE s.started_at IS NOT NULL
+    GROUP BY date(s.started_at)
+    UNION ALL
+    SELECT
+        date(started_at) AS day,
+        'conversational' AS layer,
+        COUNT(*) AS session_count,
+        ROUND(SUM(COALESCE(cost_usd, 0)), 6) AS cost_usd,
+        SUM(COALESCE(total_tokens, 0)) AS total_tokens
+    FROM conversational_sessions
+    WHERE started_at IS NOT NULL
+    GROUP BY date(started_at)
+    ORDER BY day DESC, layer
+    """)
     conn.commit()
 
 

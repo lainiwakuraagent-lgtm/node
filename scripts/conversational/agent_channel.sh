@@ -169,6 +169,12 @@ while true; do
 
     log_line "Session #$RESTART_COUNT exited (code=$EXIT_CODE, reason=$EXIT_REASON)."
 
+    # Write conversational analytics record for this channel session.
+    /usr/bin/python3 "$PROJECT_DIR/tools/conversational/conversational_analytics_write.py" \
+        --channel "$CHANNEL_ID" \
+        --exit-reason "$EXIT_REASON" \
+        2>/dev/null || true
+
     case "$EXIT_REASON" in
         context_full)
             # Context window exhausted — restart with checkpoint for continuity
