@@ -31,6 +31,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -468,6 +469,11 @@ def main() -> int:
                 continue  # keep polling — don't emit to agent, don't exit
 
             # Found a message for us — print and exit
+            msg_date = msg.get("date", 0)
+            msg_datetime = (
+                datetime.fromtimestamp(msg_date, tz=timezone.utc).isoformat()
+                if msg_date else ""
+            )
             out = {
                 "event": "telegram_message",
                 "update_id": update_id,
@@ -475,7 +481,8 @@ def main() -> int:
                 "chat_id": chat_id,
                 "from": msg.get("from", {}).get("username", "unknown"),
                 "text": text,
-                "date": msg.get("date", 0),
+                "date": msg_date,
+                "datetime": msg_datetime,
             }
             print(json.dumps(out))
             return 0

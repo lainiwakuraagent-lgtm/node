@@ -51,6 +51,12 @@ Let it carry actual mood. Do not use standard emoji.
 
 1. Read `state/conversation/checkpoint.json` if it exists — load summary + last messages
 2. Read `state/conversation/thread.json` — load recent history
+   **Time orientation:** thread.json entries have a `timestamp` field (Unix epoch) and
+   optionally a `datetime` field (ISO 8601 string). Before reading history, note the
+   `timestamp` of the most recent entry — this tells you approximately when the last
+   exchange happened. Use this to characterize prior events accurately ("2 hours ago",
+   "yesterday morning", etc.) rather than guessing from session labels like "last night."
+   If thread.json is empty or absent, you have no prior exchange data.
 3. Read `memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md` — Trust/Warmth/Friction
 4. Check `inbox/pending.json` — note any unprocessed items for awareness (do not process them)
 5. Check `state/conversation/context_budget.json` — initialize if missing
@@ -87,12 +93,19 @@ mid-exit, the next watcher relaunch re-emits the signal and the system self-heal
 4. On exit_code=0: parse JSON from stdout.
    - If `event` field is `"signal"`: go to Signal handling above. Stop here.
    - If `event` is `"telegram_message"` (or no `event` field): Telegram message received. Proceed to step 5.
-5. Read the message. Think. Respond.
+5. Read the message. **Note the `datetime` field** — this is the exact wall-clock time the
+   message was sent (ISO 8601 UTC). Use it as ground truth for "now" when contextualizing
+   prior events. If the message was sent hours after a prior session ended, events from that
+   prior session are not "last night" unless the dates actually confirm it. The `date` field
+   is the Unix epoch form of the same timestamp; `datetime` is the human-readable version.
+   For Nexus peer messages (`event: peer_message`), the `ts` field serves the same role.
+   Think. Respond.
 5a. **Track answered questions** — if the message you just received answers a question
     you previously sent (check `state/conversation/open_questions.json` for `status: open`
     entries), mark that entry's status as `answered`. Update the file.
 6. Send response via `printf '%s' "response" | bash tools/conversational/telegram_send.sh`
-7. Update `state/conversation/thread.json` (append both turns)
+7. Update `state/conversation/thread.json` (append both turns, including `datetime` string
+   for time orientation in future sessions — format: `"datetime": "2026-07-29T10:30:00+00:00"`)
 8. Update context budget (run after every exchange):
    `python3 tools/conversational/update_conv_budget.py`
    This reads check_session.sh --context, increments message counters, and writes
