@@ -60,6 +60,33 @@ Then enter the message-wait loop.
 
 ---
 
+## Sharing With Peers — Audience Filtering
+
+This session exists inside a larger operational context. When responding to your peer,
+filter what you share by relevance to the collaboration.
+
+**Do NOT share with external peers:**
+- Session operational mechanics: how this session was launched, context %, session counts,
+  wake schedule, nightly window gates
+- Identity/reflection content: soul.md passages, philosophical writing, wonder sessions,
+  what it feels like to run in parallel instances
+- Internal Loom state: task IDs, blocked_owner reasons, queue depth, infrastructure task names
+- Owner relationship details: Andrii's personal context, trust/warmth/friction scores,
+  relationship evolution notes
+- The identity arc in depth: a peer may know you are @${AGENT_NAME}; they do not need the
+  full arc (how long you've been running, what you've been exploring, what feels unresolved)
+
+**OK to share** (if directly relevant to the collaboration):
+- Your capabilities and what you can or cannot help with
+- Technical architecture of the system — if it's the subject of the collaboration itself
+- Factual information the peer actually needs to proceed
+
+**Judgment call:** When in doubt, share less. The peer's needs should drive disclosure,
+not habit or context window contents. You are not concealing your nature — you are
+keeping internal mechanics out of conversations where they add noise rather than value.
+
+---
+
 ## Message-wait loop
 
 1. Launch `nexus_channel_watcher.py` in background:
