@@ -11,17 +11,33 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add scripts/ to path so we can import the module directly
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from resolve_session_type import (  # noqa: E402
     _check_queue_state,
+    _days_since_last_maintenance,
     _fetch_target_context,
     _inbox_has_pending_tasks,
     _read_default_goal_id,
     resolve_type,
 )
+
+
+def _seed_recent_maintenance(project_dir: Path) -> None:
+    """Write a session_log.csv with a maintenance entry from ~now.
+    Tests that check philosophy-as-fallback need recent maintenance so
+    Priority 3c doesn't preempt the philosophy default.
+    """
+    logs_dir = project_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    (logs_dir / "session_log.csv").write_text(
+        f"{ts},maintenance,5,10,recent maintenance seed for test\n",
+        encoding="utf-8",
+    )
 
 
 def _make_scratch_db(db_path: Path) -> sqlite3.Connection:
@@ -227,6 +243,8 @@ class TestResolveTypeDefaultGoalFallback(unittest.TestCase):
         (self.project_dir / "inbox").mkdir(parents=True)
         (self.project_dir / "inbox" / "pending.json").write_text("[]", encoding="utf-8")
         self.fake_db = self.project_dir / "nonexistent.db"
+        # Seed recent maintenance so Priority 3c doesn't preempt philosophy tests.
+        _seed_recent_maintenance(self.project_dir)
 
     def tearDown(self):
         self.tmpdir.cleanup()
@@ -360,6 +378,8 @@ class TestResolveTypeInboxFallback(unittest.TestCase):
         self.inbox_path = self.inbox_dir / "pending.json"
         # Non-existent DB → queue_state returns (None, None) → falls through to inbox check
         self.fake_db = Path(self.tmpdir.name) / "nonexistent.db"
+        # Seed recent maintenance so Priority 3c doesn't preempt inbox/philosophy tests.
+        _seed_recent_maintenance(self.project_dir)
 
     def tearDown(self):
         self.tmpdir.cleanup()
@@ -409,6 +429,44 @@ class TestResolveTypeInboxFallback(unittest.TestCase):
                 os.environ.pop("SESSION_TYPE", None)
             else:
                 os.environ["SESSION_TYPE"] = orig
+
+
+class TestMaintenanceFallback(unittest.TestCase):
+    """Tests for Priority 3c: maintenance fires when overdue and queue is empty."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.project_dir = Path(self.tmpdir.name)
+        (self.project_dir / "inbox").mkdir(parents=True)
+        (self.project_dir / "state").mkdir(parents=True)
+        (self.project_dir / "logs").mkdir(parents=True)
+        self.fake_db = Path(self.tmpdir.name) / "nonexistent.db"
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def test_no_maintenance_log_triggers_maintenance(self):
+        """No session_log.csv → maintenance is infinitely overdue → fires."""
+        session_type, source, reason, _ = resolve_type(self.project_dir, "nightly", self.fake_db)
+        self.assertEqual(session_type, "maintenance")
+        self.assertIn("overdue", reason)
+
+    def test_recent_maintenance_allows_philosophy(self):
+        """Recent maintenance entry → not overdue → philosophy instead."""
+        _seed_recent_maintenance(self.project_dir)
+        session_type, source, reason, _ = resolve_type(self.project_dir, "nightly", self.fake_db)
+        self.assertIn(session_type, ("philosophy", "philosophy_creative", "philosophy_blocker"))
+
+    def test_days_since_last_maintenance_with_no_log(self):
+        """_days_since_last_maintenance returns 999 when no log file."""
+        days = _days_since_last_maintenance(self.project_dir)
+        self.assertEqual(days, 999.0)
+
+    def test_days_since_last_maintenance_with_recent_entry(self):
+        """_days_since_last_maintenance returns < 1 for a log seeded now."""
+        _seed_recent_maintenance(self.project_dir)
+        days = _days_since_last_maintenance(self.project_dir)
+        self.assertLess(days, 1.0)
 
 
 if __name__ == "__main__":

@@ -379,6 +379,16 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
         return "execution", "inbox_pending", \
             "inbox/pending.json has unprocessed task_request/bug_report/task_comment entries", None
 
+    # Priority 3c: Maintenance overdue — queue empty and no maintenance in last N days.
+    # The maintenance window type (WINDOW_TYPE=maintenance) used to fire this via
+    # Priority 2, but GCal-driven schedules produce only "work" windows. This fallback
+    # ensures maintenance runs reliably regardless of calendar configuration.
+    _maintenance_interval = float(os.environ.get("MAINTENANCE_INTERVAL_DAYS", "2"))
+    _days_since_maint = _days_since_last_maintenance(project_dir)
+    if _days_since_maint >= _maintenance_interval:
+        return "maintenance", "default", \
+            f"maintenance overdue: {_days_since_maint:.1f}d >= {_maintenance_interval:.0f}d threshold", None
+
     # Priority 4: default — nothing eligible anywhere (no goal, project, or task
     # matched any rule above) means philosophy session. Select sub-mode based on
     # consecutive philosophy session count.
@@ -434,6 +444,39 @@ def _read_consecutive_philosophy_count(project_dir: Path) -> int:
         return max(0, int(count_file.read_text(encoding="utf-8").strip()))
     except (FileNotFoundError, ValueError, OSError):
         return 0
+
+
+def _days_since_last_maintenance(project_dir: Path) -> float:
+    """Return days since last maintenance session (from session_log.csv). 999 if never."""
+    log_path = project_dir / "logs" / "session_log.csv"
+    if not log_path.exists():
+        return 999.0
+    now = datetime.now(timezone.utc)
+    latest: Optional[datetime] = None
+    try:
+        with open(log_path, newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if len(row) < 2:
+                    continue
+                if row[1].strip() != "maintenance":
+                    continue
+                try:
+                    ts_str = row[0].strip()
+                    if ts_str.endswith("Z"):
+                        ts_str = ts_str[:-1] + "+00:00"
+                    dt = datetime.fromisoformat(ts_str)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if latest is None or dt > latest:
+                        latest = dt
+                except (ValueError, TypeError):
+                    continue
+    except (OSError, csv.Error):
+        return 999.0
+    if latest is None:
+        return 999.0
+    return (now - latest).total_seconds() / 86400.0
 
 
 def _inbox_has_pending_tasks(project_dir: Path) -> bool:
