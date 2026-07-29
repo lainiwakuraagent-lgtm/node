@@ -161,7 +161,10 @@ def load_last_read(channel_id: str) -> str | None:
 
 
 def save_last_read(channel_id: str, iso_ts: str) -> None:
-    (_channel_dir(channel_id) / "last_read.txt").write_text(iso_ts)
+    p = _channel_dir(channel_id) / "last_read.txt"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(iso_ts)
+    tmp.rename(p)
 
 
 def load_thresholds(channel_id: str) -> dict:
