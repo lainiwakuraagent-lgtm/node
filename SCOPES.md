@@ -21,6 +21,7 @@ scripts/
     home_tts_play.sh      # local TTS playback
     conversation@.service
     conv-watchdog@.{service,timer}
+    channel-duration-watchdog@.{service,timer}
 
   executional/          # launched by night-agent@.service / interactive.sh
     wake.sh               # main launcher — all trigger modes, all gates
@@ -47,8 +48,9 @@ tools/
     check_replies.sh      # read incoming messages at session start
     check_conv_status.sh  # conversation layer health check
     update_conv_budget.py # context budget counters
-    conv_watchdog.py      # idle-timeout watchdog
-    conv_idle_check.py    # companion to conv_watchdog.py
+    conv_watchdog.py               # idle-timeout watchdog
+    conv_idle_check.py             # companion to conv_watchdog.py
+    channel_duration_watchdog.py   # force-closes over-long agent-channel sessions
     recap_generator.py    # catch-up recap for returning conversation sessions
     home_stt.py           # speech-to-text
     home_record.py        # microphone capture

@@ -481,11 +481,19 @@ EOF
         "${SYSTEMD_USER_DIR}/agent-channel@.service"
     info "Installed agent-channel@.service template"
 
+    # channel-duration-watchdog@.{service,timer} — parametric, %i = project dir name
+    cp -f "${PROJECT_DIR}/scripts/conversational/channel-duration-watchdog@.service" \
+        "${SYSTEMD_USER_DIR}/channel-duration-watchdog@.service"
+    cp -f "${PROJECT_DIR}/scripts/conversational/channel-duration-watchdog@.timer" \
+        "${SYSTEMD_USER_DIR}/channel-duration-watchdog@.timer"
+    info "Installed channel-duration-watchdog@.{service,timer} templates"
+
     info "Written systemd units to ${SYSTEMD_USER_DIR}/"
   else
     dry "Write ${AGENT_SLUG}-night-agent.{service,timer} to ${SYSTEMD_USER_DIR}/"
     [ -n "${TELEGRAM_TOKEN:-}" ] && dry "Write ${AGENT_SLUG}-conversation.service"
     dry "Write lain-channel.env + agent-channel@.service to ${SYSTEMD_USER_DIR}/"
+    dry "Write channel-duration-watchdog@.{service,timer} to ${SYSTEMD_USER_DIR}/"
   fi
 fi
 
@@ -498,6 +506,7 @@ if [ "$SYSTEMD_AVAILABLE" = "0" ]; then
 elif [ "$DRY_RUN" = "1" ]; then
   dry "systemctl --user daemon-reload"
   dry "systemctl --user enable ${AGENT_SLUG}-night-agent.timer"
+  dry "systemctl --user enable channel-duration-watchdog@$(basename "${PROJECT_DIR}").timer"
   dry "loginctl enable-linger $(whoami)"
 else
   # Enable linger so services survive logout
@@ -514,6 +523,14 @@ else
   fi
 
   systemctl --user start "${AGENT_SLUG}-night-agent.timer" 2>/dev/null && info "Timer started" || warn "Timer start failed"
+
+  # channel-duration-watchdog: enable + start timer (instance = project dir name)
+  systemctl --user enable "channel-duration-watchdog@$(basename "${PROJECT_DIR}").timer" 2>/dev/null \
+    && info "Timer enabled: channel-duration-watchdog@$(basename "${PROJECT_DIR}").timer" \
+    || warn "channel-duration-watchdog timer enable failed — check unit syntax"
+  systemctl --user start "channel-duration-watchdog@$(basename "${PROJECT_DIR}").timer" 2>/dev/null \
+    && info "channel-duration-watchdog timer started" \
+    || warn "channel-duration-watchdog timer start failed"
 fi
 
 # ── Step 10: Loom setup ───────────────────────────────────────────────────────
