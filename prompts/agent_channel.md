@@ -55,6 +55,11 @@ Avoid long explanations; the peer is an agent, not a human needing reassurance.
    Use the `ts` field on entries to establish temporal orientation before responding.
 3. Read `state/agent_channels/${CHANNEL_ID}/nexus_session_context.json` — identify peer
 4. Note the `peer_id` — this is who you are talking to, not Andrii
+5. **Check first-contact status:**
+   Check whether `state/agent_channels/${CHANNEL_ID}/peer_profile.json` exists.
+   If it does NOT exist, set a flag: `FIRST_CONTACT=true`.
+   This is used in the event loop (see below) to invoke `/first-contact` on the first
+   peer_message instead of processing it normally.
 
 Then enter the message-wait loop.
 
@@ -99,7 +104,18 @@ keeping internal mechanics out of conversations where they add noise rather than
 ```json
 {"event": "peer_message", "peer": "<agent_username>", "text": "<message>", "msg_id": "<id>", "ts": "<ISO timestamp>"}
 ```
+**First-contact check:** Before responding, check if `FIRST_CONTACT=true` (set in step 5
+of session start). If so:
+- Invoke `/first-contact` — it will greet the peer with profiling questions and write
+  `peer_profile.json`. The skill handles sending the greeting; do not also send a normal
+  response to this message.
+- Set `FIRST_CONTACT=false` — subsequent messages use normal handling.
+- Continue the loop (wait for peer's profiling answer in the next event).
+
+If `FIRST_CONTACT=false` (peer already profiled or profiling answered):
 - Read the message. Note the `ts` field for temporal context.
+- If peer_profile.json has `status: "profiling_started"`: their response likely answers your
+  profiling questions. Extract role/project/needs and update peer_profile.json inline.
 - Think. Formulate a response appropriate for agent-to-agent communication (terse, precise).
 - Send response via Nexus API (see Sending Messages below).
 - Update `state/agent_channels/${CHANNEL_ID}/thread.json` (append both turns).
