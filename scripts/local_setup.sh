@@ -467,10 +467,25 @@ WantedBy=default.target
 EOF
     fi
 
+    # agent-channel@.service template — one instance per Nexus channel.
+    # The template itself uses an EnvironmentFile for PROJECT_DIR because
+    # %i (instance name) is the channel_id, not the project directory.
+    # Write the env file first, then install the template as a symlink.
+    CHANNEL_ENV_FILE="${SYSTEMD_USER_DIR}/lain-channel.env"
+    printf 'PROJECT_DIR=%s\n' "${PROJECT_DIR}" > "${CHANNEL_ENV_FILE}"
+    info "Written ${CHANNEL_ENV_FILE}"
+
+    # Install the template (copy, not symlink — systemd templates must be in
+    # the user unit dir, not discovered via symlink to repo path)
+    cp -f "${PROJECT_DIR}/scripts/conversational/agent-channel@.service" \
+        "${SYSTEMD_USER_DIR}/agent-channel@.service"
+    info "Installed agent-channel@.service template"
+
     info "Written systemd units to ${SYSTEMD_USER_DIR}/"
   else
     dry "Write ${AGENT_SLUG}-night-agent.{service,timer} to ${SYSTEMD_USER_DIR}/"
     [ -n "${TELEGRAM_TOKEN:-}" ] && dry "Write ${AGENT_SLUG}-conversation.service"
+    dry "Write lain-channel.env + agent-channel@.service to ${SYSTEMD_USER_DIR}/"
   fi
 fi
 
