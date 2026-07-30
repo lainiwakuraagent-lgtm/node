@@ -123,9 +123,56 @@ if [ "$last_recorded_night" != "$night_id" ]; then
   echo "0" > "$COUNT_FILE"
   echo "$night_id" > "$DATE_FILE"
   echo "0" > "$STATE_DIR/consecutive_philosophy.count"
+  rm -f "$STATE_DIR/philosophy_cap.active" "$STATE_DIR/philosophy_cap_notified_at.txt"   # Clear philosophy cap on new night
   log_line "New night detected ($night_id). Session counter reset to 0."
 fi
 current_count=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
+
+# --- Early abort: philosophy cap active ---
+# Written by the philosophy_cap session type gate (below). Prevents full type-resolution
+# overhead on every 30s-poll wake when the cap is simply holding.
+# Cleared on new night (above) or when real inbox work appears.
+if [ -f "$STATE_DIR/philosophy_cap.active" ] && [ "$TRIGGER_MODE" = "nightly" ]; then
+  # Check if inbox has pending work — if so, clear the cap and proceed
+  _inbox_pending=0
+  if [ -f "$PROJECT_DIR/inbox/pending.json" ]; then
+    _inbox_pending=$(/usr/bin/python3 -c "
+import json, sys
+try:
+  data = json.load(open('$PROJECT_DIR/inbox/pending.json'))
+  active = [e for e in data if not e.get('processed', False)
+            and e.get('type') in ('task_request','bug_report','task_comment')]
+  print(len(active))
+except:
+  print(0)
+" 2>/dev/null || echo "0")
+  fi
+
+  if [ "$_inbox_pending" -gt 0 ]; then
+    log_line "Philosophy cap active but inbox_pending=$_inbox_pending — clearing cap."
+    rm -f "$STATE_DIR/philosophy_cap.active" "$STATE_DIR/philosophy_cap_notified_at.txt"
+  else
+    # T443: proactive notification when cap has been held > threshold with empty inbox
+    _cap_ts=$(cat "$STATE_DIR/philosophy_cap.active" 2>/dev/null | tr -d '[:space:]' || echo "0")
+    _now=$(date +%s)
+    _age=$(( _now - _cap_ts ))
+    _notify_threshold=${PHILOSOPHY_CAP_NOTIFY_THRESHOLD:-7200}
+    _notify_rate=${PHILOSOPHY_CAP_NOTIFY_RATE:-10800}
+    _last_notify=$(cat "$STATE_DIR/philosophy_cap_notified_at.txt" 2>/dev/null | tr -d '[:space:]' || echo "0")
+    _since_notify=$(( _now - _last_notify ))
+    if [ "$_age" -gt "$_notify_threshold" ] && [ "$_since_notify" -gt "$_notify_rate" ]; then
+      _age_h=$(( _age / 3600 ))
+      _cap_time=$(date -d "@${_cap_ts}" '+%H:%M %Z %Y-%m-%d' 2>/dev/null || echo "ts=${_cap_ts}")
+      printf '@Lain philosophy cap: held %dh (since %s). Inbox empty — no sessions will run until a task arrives or the next nightly boundary resets. To unblock manually: rm state/philosophy_cap.active' \
+        "$_age_h" "$_cap_time" \
+        | bash "$PROJECT_DIR/tools/conversational/telegram_send.sh" 2>/dev/null || true
+      echo "$_now" > "$STATE_DIR/philosophy_cap_notified_at.txt"
+      log_line "T443: philosophy_cap_alert sent (${_age}s held, inbox=0)"
+    fi
+    log_line "ABORT: philosophy cap active (state/philosophy_cap.active). Skipping."
+    exit 0
+  fi
+fi
 
 # --- Gate 0: subscription usage limits (nightly + emergency) ---
 # manual is a deliberate break-glass override: it exists for exactly the case
@@ -417,6 +464,11 @@ except Exception:
   if [ "$CURRENT_SESSION_TYPE" = "philosophy_cap" ]; then
     _consec=$(cat "$STATE_DIR/consecutive_philosophy.count" 2>/dev/null || echo "3")
     log_line "ABORT: philosophy cap reached (consecutive_philosophy.count=$_consec). Skipping session."
+    # Write cap-active flag for early-abort on subsequent 30s-poll wakes.
+    # Cleared by new-night detection or inbox pending work.
+    if [ ! -f "$STATE_DIR/philosophy_cap.active" ]; then
+      echo "$(date +%s)" > "$STATE_DIR/philosophy_cap.active"
+    fi
     write_trigger_result "aborted" "philosophy cap reached (consecutive_philosophy_count=$_consec)"
     rm -f "$AUGMENTED_GOAL" "$DYNAMIC_GOAL_FILE"
     exit 0
