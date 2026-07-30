@@ -67,13 +67,20 @@ finishing the original removal as originally scoped.
 
 Everything needed before the repo is public and someone else can use it.
 
-### Install script
-A single `install.sh` that:
-- Copies systemd units and enables the timer
-- Initializes state directory and counter files
-- Templates `agent_config.env` from `.example`
-- Validates that Loom is installed and reachable
-- Prints a clear "next steps" summary
+### Install script ✓ done
+
+`install.sh` (1153 lines, 10 steps) replaces the old `scripts/local_setup.sh` +
+`scripts/provision_agent.sh` pair. Both legacy scripts have been deleted.
+
+- [x] Copies systemd units and enables the timer (Step 7)
+- [x] Initializes state directory and counter files (Step 3)
+- [x] Templates `agent_config.env` from `.example` (Step 4)
+- [x] Validates that Loom is installed and reachable (Step 8)
+- [x] Prints a clear "next steps" summary (Step 10)
+- [x] Remote install via SSH with `--remote` flag (Step 2b)
+- [x] Smoke test for key files after install (Step 9)
+- [x] Nexus registration + credential scaffolding (Steps 5–6)
+- [ ] Persona capture via guided prompts (T442 — pending)
 
 ### Error recovery
 - Define a recovery protocol for common failure modes: stuck lock file, Claude crash
