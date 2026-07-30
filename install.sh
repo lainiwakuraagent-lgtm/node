@@ -584,9 +584,221 @@ else
   rm -f "$_nexus_resp"
 fi
 
-# ── Steps 7–9: systemd, smoke test, persona ───────────────────────────────────
-# (implemented in subsequent tasks: T437–T440)
-step "7–9: Remaining steps (not yet implemented)"
-warn "Steps 7–9 are not yet implemented — run scripts/local_setup.sh for the full setup."
-warn "Steps done so far: prerequisites ✓  directories ✓  agent_config.env ✓  credentials ✓  nexus ✓"
+# ── Step 7: Systemd units ─────────────────────────────────────────────────────
+
+step "7: Systemd units"
+
+if [ "$SYSTEMD_AVAILABLE" = "0" ]; then
+  info "SKIP — systemd --user not available"
+  info "To run manually: bash ${INSTALL_ROOT}/scripts/executional/wake.sh"
+else
+  # Resolve paths for local vs remote
+  if [ "$REMOTE" = "1" ]; then
+    _UNIT_HOME="/home/${TARGET_USER}"
+  else
+    _UNIT_HOME="${HOME}"
+  fi
+  SYSTEMD_USER_DIR="${_UNIT_HOME}/.config/systemd/user"
+  AGENT_SLUG="${AGENT_NAME}"
+
+  # Helper: write a file to local or remote destination
+  _write_unit_file() {
+    local dest="$1"
+    local content="$2"
+    if [ "$REMOTE" = "1" ]; then
+      printf '%s\n' "$content" | ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+        "${TARGET_USER}@${TARGET_HOST}" "cat > '${dest}'"
+    else
+      printf '%s\n' "$content" > "$dest"
+    fi
+  }
+
+  # Helper: copy a local file to local or remote destination
+  _copy_unit_file() {
+    local src="$1"
+    local dest="$2"
+    if [ "$REMOTE" = "1" ]; then
+      cat "$src" | ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+        "${TARGET_USER}@${TARGET_HOST}" "cat > '${dest}'"
+    else
+      cp -f "$src" "$dest"
+    fi
+  }
+
+  if [ "$DRY_RUN" = "1" ]; then
+    dry "mkdir -p '${SYSTEMD_USER_DIR}'"
+    dry "Write ${AGENT_SLUG}-night-agent.service to ${SYSTEMD_USER_DIR}/"
+    dry "Write ${AGENT_SLUG}-night-agent.timer to ${SYSTEMD_USER_DIR}/"
+    [ -n "${TELEGRAM_TOKEN:-}" ] && dry "Write ${AGENT_SLUG}-conversation.service to ${SYSTEMD_USER_DIR}/"
+    dry "Write lain-channel.env + agent-channel@.service to ${SYSTEMD_USER_DIR}/"
+    dry "Write channel-duration-watchdog@.{service,timer} to ${SYSTEMD_USER_DIR}/"
+  else
+    if [ "$REMOTE" = "1" ]; then
+      ssh_run "mkdir -p '${SYSTEMD_USER_DIR}'"
+    else
+      mkdir -p "${SYSTEMD_USER_DIR}"
+    fi
+
+    # night-agent.service
+    _write_unit_file "${SYSTEMD_USER_DIR}/${AGENT_SLUG}-night-agent.service" \
+"[Unit]
+Description=Night Agent Wake Session — ${AGENT_NAME}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=${INSTALL_ROOT}
+Environment=TRIGGER_MODE=nightly
+Environment=PROJECT_DIR=${INSTALL_ROOT}
+Environment=PATH=${_UNIT_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/bash ${INSTALL_ROOT}/scripts/executional/wake.sh \\
+  ${INSTALL_ROOT}/prompts/persona.txt
+CPUQuota=40%
+MemoryMax=512M
+IOWeight=100
+TimeoutStartSec=7h
+
+[Install]
+WantedBy=default.target"
+    info "Written ${AGENT_SLUG}-night-agent.service"
+
+    # night-agent.timer
+    _write_unit_file "${SYSTEMD_USER_DIR}/${AGENT_SLUG}-night-agent.timer" \
+"[Unit]
+Description=Night Agent Timer — ${AGENT_NAME}
+Requires=${AGENT_SLUG}-night-agent.service
+
+[Timer]
+OnCalendar=*-*-* 23:00:00
+OnCalendar=*-*-* 01:10:00
+OnCalendar=*-*-* 02:25:00
+OnCalendar=*-*-* 03:40:00
+OnCalendar=*-*-* 04:55:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target"
+    info "Written ${AGENT_SLUG}-night-agent.timer"
+
+    # conversation.service (only if Telegram configured)
+    if [ -n "${TELEGRAM_TOKEN:-}" ]; then
+      _write_unit_file "${SYSTEMD_USER_DIR}/${AGENT_SLUG}-conversation.service" \
+"[Unit]
+Description=Conversation Service — ${AGENT_NAME}
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=${INSTALL_ROOT}
+Environment=PROJECT_DIR=${INSTALL_ROOT}
+Environment=PATH=${_UNIT_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/bash ${INSTALL_ROOT}/scripts/conversational/conversation.sh \\
+  ${INSTALL_ROOT}/prompts/conversation.md
+Restart=on-failure
+RestartSec=30
+KillMode=process
+CPUQuota=20%
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target"
+      info "Written ${AGENT_SLUG}-conversation.service"
+    fi
+
+    # lain-channel.env (provides PROJECT_DIR to the agent-channel@ template)
+    _CHANNEL_ENV="${SYSTEMD_USER_DIR}/lain-channel.env"
+    _write_unit_file "$_CHANNEL_ENV" "PROJECT_DIR=${INSTALL_ROOT}"
+    info "Written lain-channel.env"
+
+    # agent-channel@.service template (copy from repo)
+    _copy_unit_file \
+      "${PROJECT_DIR}/scripts/conversational/agent-channel@.service" \
+      "${SYSTEMD_USER_DIR}/agent-channel@.service"
+    info "Installed agent-channel@.service template"
+
+    # channel-duration-watchdog@.{service,timer} templates (copy from repo)
+    _copy_unit_file \
+      "${PROJECT_DIR}/scripts/conversational/channel-duration-watchdog@.service" \
+      "${SYSTEMD_USER_DIR}/channel-duration-watchdog@.service"
+    _copy_unit_file \
+      "${PROJECT_DIR}/scripts/conversational/channel-duration-watchdog@.timer" \
+      "${SYSTEMD_USER_DIR}/channel-duration-watchdog@.timer"
+    info "Installed channel-duration-watchdog@.{service,timer} templates"
+
+    info "Systemd units written to ${SYSTEMD_USER_DIR}/"
+  fi
+
+  # Enable and start
+  if [ "$DRY_RUN" = "1" ]; then
+    dry "loginctl enable-linger <user>"
+    dry "systemctl --user daemon-reload"
+    dry "systemctl --user enable ${AGENT_SLUG}-night-agent.timer"
+    dry "systemctl --user start  ${AGENT_SLUG}-night-agent.timer"
+    [ -n "${TELEGRAM_TOKEN:-}" ] && dry "systemctl --user enable --now ${AGENT_SLUG}-conversation.service"
+    dry "systemctl --user enable channel-duration-watchdog@$(basename "${INSTALL_ROOT}").timer"
+    dry "systemctl --user start  channel-duration-watchdog@$(basename "${INSTALL_ROOT}").timer"
+  else
+    if [ "$REMOTE" = "1" ]; then
+      ssh_run "loginctl enable-linger '${TARGET_USER}' 2>/dev/null || true"
+      ssh_run "systemctl --user daemon-reload"
+      ssh_run "systemctl --user enable '${AGENT_SLUG}-night-agent.timer' 2>/dev/null \
+               && echo '  [  OK ] Timer enabled: ${AGENT_SLUG}-night-agent.timer' \
+               || echo '  [WARN]  Timer enable failed — check unit syntax'"
+      ssh_run "systemctl --user start '${AGENT_SLUG}-night-agent.timer' 2>/dev/null \
+               && echo '  [  OK ] Timer started: ${AGENT_SLUG}-night-agent.timer' \
+               || echo '  [WARN]  Timer start failed'"
+      if [ -n "${TELEGRAM_TOKEN:-}" ]; then
+        ssh_run "systemctl --user enable '${AGENT_SLUG}-conversation.service' 2>/dev/null \
+                 && echo '  [  OK ] Conversation service enabled' \
+                 || echo '  [WARN]  Conversation service enable failed'"
+        ssh_run "systemctl --user start '${AGENT_SLUG}-conversation.service' 2>/dev/null \
+                 && echo '  [  OK ] Conversation service started' \
+                 || echo '  [WARN]  Conversation service start failed — check logs'"
+      fi
+      _PROJ_BASE="$(basename "${INSTALL_ROOT}")"
+      ssh_run "systemctl --user enable 'channel-duration-watchdog@${_PROJ_BASE}.timer' 2>/dev/null \
+               && echo '  [  OK ] Watchdog timer enabled: channel-duration-watchdog@${_PROJ_BASE}.timer' \
+               || echo '  [WARN]  Watchdog timer enable failed'"
+      ssh_run "systemctl --user start 'channel-duration-watchdog@${_PROJ_BASE}.timer' 2>/dev/null \
+               && echo '  [  OK ] Watchdog timer started' \
+               || echo '  [WARN]  Watchdog timer start failed'"
+    else
+      loginctl enable-linger "$(whoami)" 2>/dev/null && info "linger enabled" || info "linger: already enabled"
+      systemctl --user daemon-reload
+      systemctl --user enable "${AGENT_SLUG}-night-agent.timer" 2>/dev/null \
+        && ok "Timer enabled: ${AGENT_SLUG}-night-agent.timer" \
+        || warn "Timer enable failed — check unit syntax"
+      systemctl --user start "${AGENT_SLUG}-night-agent.timer" 2>/dev/null \
+        && ok "Timer started: ${AGENT_SLUG}-night-agent.timer" \
+        || warn "Timer start failed"
+      if [ -n "${TELEGRAM_TOKEN:-}" ]; then
+        systemctl --user enable "${AGENT_SLUG}-conversation.service" 2>/dev/null \
+          && ok "Conversation service enabled" \
+          || warn "Conversation service enable failed"
+        systemctl --user start "${AGENT_SLUG}-conversation.service" 2>/dev/null \
+          && ok "Conversation service started" \
+          || warn "Conversation service start failed — check logs"
+      else
+        info "Conversation service: skipped (no Telegram token)"
+      fi
+      _PROJ_BASE="$(basename "${INSTALL_ROOT}")"
+      systemctl --user enable "channel-duration-watchdog@${_PROJ_BASE}.timer" 2>/dev/null \
+        && ok "Watchdog timer enabled: channel-duration-watchdog@${_PROJ_BASE}.timer" \
+        || warn "channel-duration-watchdog timer enable failed"
+      systemctl --user start "channel-duration-watchdog@${_PROJ_BASE}.timer" 2>/dev/null \
+        && ok "Watchdog timer started" \
+        || warn "channel-duration-watchdog timer start failed"
+    fi
+  fi
+fi
+
+# ── Steps 8–9: Loom, smoke test, persona ─────────────────────────────────────
+# (implemented in subsequent tasks: T438–T440)
+step "8–9: Remaining steps (not yet implemented)"
+warn "Steps 8–9 are not yet implemented."
+warn "Steps done so far: prerequisites ✓  directories ✓  agent_config.env ✓  credentials ✓  nexus ✓  systemd ✓"
 exit 0
