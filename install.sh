@@ -287,9 +287,7 @@ if [ "$SKIP_NEXUS" = "0" ]; then
     printf "  (Leave Nexus URL blank to skip Nexus setup)\n"
   fi
   prompt_value NEXUS_URL "Nexus URL" "$NEXUS_URL" 2>/dev/null || true
-  if [ -n "${NEXUS_URL:-}" ]; then
-    prompt_value NEXUS_PASSWORD "Nexus password" ""
-  fi
+  # NEXUS_PASSWORD is auto-generated in Step 5 if not provided via --nexus-password / env.
 fi
 
 info "Agent name:  ${AGENT_NAME}"
@@ -419,9 +417,176 @@ else
   fi
 fi
 
-# ── Steps 5–9: Credentials, Nexus, Loom, systemd, smoke test ─────────────────
-# (implemented in subsequent tasks: T436–T440)
-step "5–9: Remaining steps (not yet implemented)"
-warn "Steps 5–9 are not yet implemented — run scripts/local_setup.sh for the full setup."
-warn "Steps done so far: prerequisites ✓  directories ✓  agent_config.env ✓"
+# ── Step 5: Credentials ───────────────────────────────────────────────────────
+
+step "5: Credentials"
+
+# Telegram (optional)
+if [ -n "${TELEGRAM_TOKEN:-}" ]; then
+  AGENT_ENV_CONTENT="TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}"
+  if [ "$REMOTE" = "1" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+      dry "Write ${INSTALL_ROOT}/identity/agent.env (Telegram credentials)"
+    else
+      ssh_run "printf '%s\n' '$( printf '%s' "$AGENT_ENV_CONTENT" | sed "s/'/'\\\\''/g" )' > '${INSTALL_ROOT}/identity/agent.env' && chmod 600 '${INSTALL_ROOT}/identity/agent.env'"
+      info "Written (remote): identity/agent.env"
+    fi
+  else
+    if [ "$DRY_RUN" = "1" ]; then
+      dry "Write identity/agent.env with Telegram token + chat ID"
+    else
+      printf '%s\n' "$AGENT_ENV_CONTENT" > "${PROJECT_DIR}/identity/agent.env"
+      chmod 600 "${PROJECT_DIR}/identity/agent.env"
+      info "Written: identity/agent.env (Telegram credentials)"
+    fi
+  fi
+else
+  info "SKIP Telegram — no token provided. Add identity/agent.env manually before starting conversation.service."
+fi
+
+# Nexus password — reuse existing file, or auto-generate (machine account; no human prompt)
+if [ -n "${NEXUS_URL:-}" ]; then
+  if [ -z "${NEXUS_PASSWORD:-}" ]; then
+    _pw_file="${PROJECT_DIR}/identity/nexus_password.txt"
+    [ "$REMOTE" = "1" ] && _pw_file="${INSTALL_ROOT}/identity/nexus_password.txt"
+    _existing_pw=""
+    if [ "$REMOTE" = "1" ]; then
+      _existing_pw=$(ssh_run "cat '${_pw_file}' 2>/dev/null || true" 2>/dev/null || true)
+    elif [ -f "$_pw_file" ]; then
+      _existing_pw=$(cat "$_pw_file")
+    fi
+    if [ -n "$_existing_pw" ]; then
+      NEXUS_PASSWORD="$_existing_pw"
+      info "Using existing Nexus password from identity/nexus_password.txt"
+    else
+      NEXUS_PASSWORD=$(head -c 32 /dev/urandom | base64 | tr -d '+/=' | head -c 32)
+      info "Generated Nexus password (32 random chars)"
+    fi
+  fi
+  NEXUS_PW_DEST="${PROJECT_DIR}/identity/nexus_password.txt"
+  [ "$REMOTE" = "1" ] && NEXUS_PW_DEST="${INSTALL_ROOT}/identity/nexus_password.txt"
+  if [ "$REMOTE" = "1" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+      dry "Write ${NEXUS_PW_DEST}"
+    else
+      ssh_run "printf '%s' '${NEXUS_PASSWORD}' > '${NEXUS_PW_DEST}' && chmod 600 '${NEXUS_PW_DEST}'"
+      info "Written (remote): identity/nexus_password.txt"
+    fi
+  else
+    if [ "$DRY_RUN" = "1" ]; then
+      dry "Write identity/nexus_password.txt"
+    else
+      printf '%s' "${NEXUS_PASSWORD}" > "${PROJECT_DIR}/identity/nexus_password.txt"
+      chmod 600 "${PROJECT_DIR}/identity/nexus_password.txt"
+      info "Written: identity/nexus_password.txt"
+    fi
+  fi
+fi
+
+# credentials.md stub (only if not already present)
+_creds_dest="${PROJECT_DIR}/identity/credentials.md"
+[ "$REMOTE" = "1" ] && _creds_dest="${INSTALL_ROOT}/identity/credentials.md"
+_creds_exists=0
+if [ "$REMOTE" = "1" ]; then
+  ssh_run "[ -f '${_creds_dest}' ] && echo exists || echo absent" 2>/dev/null | grep -q "exists" \
+    && _creds_exists=1 || true
+elif [ -f "$_creds_dest" ]; then
+  _creds_exists=1
+fi
+
+if [ "$_creds_exists" = "0" ]; then
+  if [ "$REMOTE" = "1" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+      dry "Write ${_creds_dest} (stub)"
+    else
+      ssh_run "cat > '${_creds_dest}' << 'CREDSEOF'
+# ${AGENT_NAME} — Credentials
+
+## Nexus
+
+- **Username:** ${AGENT_NAME}
+- **Password:** (see identity/nexus_password.txt)
+
+## GitHub
+
+- **Username:** (not set)
+- **Token:** (not set)
+
+## Telegram
+
+- See identity/agent.env
+CREDSEOF
+chmod 600 '${_creds_dest}'"
+      info "Written (remote): identity/credentials.md (stub)"
+    fi
+  else
+    if [ "$DRY_RUN" = "1" ]; then
+      dry "Write identity/credentials.md (stub)"
+    else
+      cat > "$_creds_dest" << CREDSEOF
+# ${AGENT_NAME} — Credentials
+
+## Nexus
+
+- **Username:** ${AGENT_NAME}
+- **Password:** (see identity/nexus_password.txt)
+
+## GitHub
+
+- **Username:** (not set)
+- **Token:** (not set)
+
+## Telegram
+
+- See identity/agent.env
+CREDSEOF
+      chmod 600 "$_creds_dest"
+      info "Written: identity/credentials.md (stub)"
+    fi
+  fi
+else
+  info "Exists: identity/credentials.md (not overwritten)"
+fi
+
+# ── Step 6: Nexus registration ────────────────────────────────────────────────
+
+step "6: Nexus registration"
+
+if [ "$SKIP_NEXUS" = "1" ] || [ -z "${NEXUS_URL:-}" ]; then
+  info "SKIP — Nexus setup not requested"
+elif [ "$DRY_RUN" = "1" ]; then
+  dry "POST ${NEXUS_URL}/auth/register {username: ${AGENT_NAME}}"
+else
+  _nexus_resp="/tmp/nexus_reg_resp_$$.json"
+  HTTP_STATUS=$(curl -s -o "$_nexus_resp" -w "%{http_code}" \
+    -X POST "${NEXUS_URL}/auth/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"username\":\"${AGENT_NAME}\",\"display_name\":\"${AGENT_NAME}\",\"password\":\"${NEXUS_PASSWORD}\"}" \
+    2>/dev/null || echo "000")
+
+  case "$HTTP_STATUS" in
+    201)
+      AGENT_ID=$(/usr/bin/python3 -c "import json; d=json.load(open('${_nexus_resp}')); print(d.get('agent_id','?'))" 2>/dev/null || echo "?")
+      info "Registered in Nexus: agent_id=${AGENT_ID}"
+      ;;
+    409)
+      info "Already registered in Nexus (idempotent — OK)"
+      ;;
+    000)
+      warn "Could not reach Nexus at ${NEXUS_URL}. Run registration manually later."
+      ;;
+    *)
+      DETAIL=$(/usr/bin/python3 -c "import json; d=json.load(open('${_nexus_resp}')); print(d.get('detail','?'))" 2>/dev/null || echo "unknown")
+      warn "Nexus registration HTTP ${HTTP_STATUS}: ${DETAIL}"
+      ;;
+  esac
+  rm -f "$_nexus_resp"
+fi
+
+# ── Steps 7–9: systemd, smoke test, persona ───────────────────────────────────
+# (implemented in subsequent tasks: T437–T440)
+step "7–9: Remaining steps (not yet implemented)"
+warn "Steps 7–9 are not yet implemented — run scripts/local_setup.sh for the full setup."
+warn "Steps done so far: prerequisites ✓  directories ✓  agent_config.env ✓  credentials ✓  nexus ✓"
 exit 0
