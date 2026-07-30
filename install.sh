@@ -492,6 +492,54 @@ else
   fi
 fi
 
+# ── Step 4b: Persona ──────────────────────────────────────────────────────────
+
+step "4b: Persona"
+
+PERSONA_NAME="${PERSONA_NAME:-}"
+PERSONA_BACKGROUND="${PERSONA_BACKGROUND:-}"
+PERSONA_DESCRIPTION="${PERSONA_DESCRIPTION:-}"
+PERSONA_FILE="${INSTALL_ROOT}/prompts/persona.txt"
+
+_persona_exists=0
+if [ "$REMOTE" = "1" ]; then
+  ssh_run "[ -f '${PERSONA_FILE}' ]" 2>/dev/null && _persona_exists=1 || true
+elif [ -f "$PERSONA_FILE" ]; then
+  _persona_exists=1
+fi
+
+if [ "$_persona_exists" = "1" ]; then
+  info "Exists: prompts/persona.txt (not overwritten)"
+else
+  prompt_value PERSONA_NAME "Agent persona name" "@${AGENT_NAME}"
+  prompt_value PERSONA_BACKGROUND \
+    "Agent background (one line)" \
+    "Autonomous agent built on the blank_node harness."
+  prompt_value PERSONA_DESCRIPTION \
+    "Core traits / character description (one line)" \
+    "- Task-focused. Precise. Clear."
+
+  _persona_content="NAME: ${PERSONA_NAME}
+
+BACKGROUND: ${PERSONA_BACKGROUND}
+
+CORE TRAITS:
+${PERSONA_DESCRIPTION}
+
+STYLE: Direct. Clear. One kaomoji when mood warrants it."
+
+  if [ "$DRY_RUN" = "1" ]; then
+    dry "Write prompts/persona.txt (NAME=${PERSONA_NAME})"
+  elif [ "$REMOTE" = "1" ]; then
+    ssh_run "cat > '${PERSONA_FILE}'" <<< "$_persona_content"
+    info "Written (remote): prompts/persona.txt"
+  else
+    printf '%s\n' "$_persona_content" > "$PERSONA_FILE"
+    info "Written: prompts/persona.txt"
+    info "  Edit prompts/persona.txt to refine the agent's voice before first run."
+  fi
+fi
+
 # ── Step 5: Credentials ───────────────────────────────────────────────────────
 
 step "5: Credentials"
@@ -1049,6 +1097,7 @@ else
   _smoke_check "scripts/executional/resolve_session_type.py" \
     "${INSTALL_ROOT}/scripts/executional/resolve_session_type.py"
   _smoke_check "prompts/wrapper_prompt.md"           "${INSTALL_ROOT}/prompts/wrapper_prompt.md"
+  _smoke_check "prompts/persona.txt"                 "${INSTALL_ROOT}/prompts/persona.txt"
   _smoke_check "state/agent_config.env"              "${INSTALL_ROOT}/state/agent_config.env"
   _smoke_check "bin/loom wrapper"                    "${INSTALL_ROOT}/bin/loom"
   _smoke_check "inbox/pending.json"                  "${INSTALL_ROOT}/inbox/pending.json"
@@ -1084,6 +1133,16 @@ echo "NEXT STEPS:"
 echo ""
 
 _step=1
+printf "  %d. Review and customize the agent's persona:\n" "$_step"
+if [ "$REMOTE" = "1" ]; then
+  echo "     ssh ${TARGET_USER}@${TARGET_HOST}"
+  echo "     \$EDITOR ${INSTALL_ROOT}/prompts/persona.txt"
+else
+  echo "     \$EDITOR ${INSTALL_ROOT}/prompts/persona.txt"
+fi
+echo "     (NAME / BACKGROUND / CORE TRAITS / STYLE — defines identity and voice)"
+echo ""
+_step=$((_step + 1))
 if [ -z "${TELEGRAM_TOKEN:-}" ]; then
   if [ "$REMOTE" = "1" ]; then
     printf "  %d. Add Telegram credentials on target:\n" "$_step"
