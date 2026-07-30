@@ -34,7 +34,8 @@
 #   --remote                   Install on a remote host over SSH
 #   --target-host <host>       Remote host IP or hostname (required with --remote)
 #   --target-user <user>       Remote SSH user (required with --remote)
-#   --install-path <path>      Remote install path (default: /home/<user>/<agent-name>)
+#   --install-path <path>      Remote install path (default: /home/<user>/lain/<agent-name>)
+#   --github-pat <pat>         GitHub PAT for private repo clone (auto-read from identity/credentials.md)
 #   --ssh-key <path>           SSH key for remote auth (default: ~/.ssh/id_ed25519)
 
 set -euo pipefail
@@ -63,6 +64,10 @@ TARGET_HOST=""
 TARGET_USER=""
 INSTALL_PATH=""
 SSH_KEY="${HOME}/.ssh/id_ed25519"
+GITHUB_PAT=""
+
+BLANK_NODE_REPO="https://github.com/lainiwakuraagent-lgtm/node.git"
+LOOM_REPO="https://github.com/lainiwakuraagent-lgtm/loom.git"
 
 SYSTEMD_AVAILABLE=1  # assumed true; prereq check may set to 0
 
@@ -105,7 +110,8 @@ Flags:
   --remote                   Install on a remote host over SSH
   --target-host <host>       Remote host IP or hostname (required with --remote)
   --target-user <user>       Remote SSH user     (required with --remote)
-  --install-path <path>      Remote install path (default: /home/<user>/<name>)
+  --install-path <path>      Remote install path (default: /home/<user>/lain/<name>)
+  --github-pat <pat>         GitHub PAT for private clone (auto-read from identity/credentials.md)
   --ssh-key <path>           SSH key             (default: ~/.ssh/id_ed25519)
 EOF
 }
@@ -159,10 +165,12 @@ prompt_value() {
   fi
 }
 
+SSH_OPTS="-i ${SSH_KEY} -o ConnectTimeout=15 -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+
 ssh_run() {
   local cmd="$1"
-  ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-    "${TARGET_USER}@${TARGET_HOST}" "$cmd"
+  # shellcheck disable=SC2086
+  ssh $SSH_OPTS "${TARGET_USER}@${TARGET_HOST}" "$cmd"
 }
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -186,6 +194,7 @@ while [[ $# -gt 0 ]]; do
     --target-user)       TARGET_USER="$2";         shift 2 ;;
     --install-path)      INSTALL_PATH="$2";        shift 2 ;;
     --ssh-key)           SSH_KEY="$2";             shift 2 ;;
+    --github-pat)        GITHUB_PAT="$2";          shift 2 ;;
     -h|--help)           usage; exit 0 ;;
     *) err "Unknown argument: $1 (try --help)" ;;
   esac
@@ -198,6 +207,38 @@ if [ "$REMOTE" = "1" ]; then
   [ -z "$TARGET_USER" ] && err "--remote requires --target-user <user>"
   [ -z "$SSH_KEY" ]     && err "--ssh-key path is required for --remote"
   [ -f "$SSH_KEY" ]     || err "SSH key not found: $SSH_KEY"
+
+  # Rebuild SSH_OPTS with confirmed key path (may differ from default)
+  SSH_OPTS="-i ${SSH_KEY} -o ConnectTimeout=15 -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+
+  # Auto-read GitHub PAT from local credentials.md if not passed via --github-pat
+  if [ -z "$GITHUB_PAT" ]; then
+    _local_creds="${PROJECT_DIR}/identity/credentials.md"
+    if [ -f "$_local_creds" ]; then
+      GITHUB_PAT=$(grep -A2 "Token:" "$_local_creds" 2>/dev/null \
+        | grep -oP 'ghp_\w+' | head -1 || true)
+      [ -n "$GITHUB_PAT" ] && info "GitHub PAT read from identity/credentials.md"
+    fi
+  fi
+
+  # Build authenticated clone URLs
+  if [ -n "$GITHUB_PAT" ]; then
+    CLONE_URL="https://lainiwakuraagent-lgtm:${GITHUB_PAT}@github.com/lainiwakuraagent-lgtm/node.git"
+    LOOM_CLONE_URL="https://lainiwakuraagent-lgtm:${GITHUB_PAT}@github.com/lainiwakuraagent-lgtm/loom.git"
+  else
+    CLONE_URL="$BLANK_NODE_REPO"
+    LOOM_CLONE_URL="$LOOM_REPO"
+    warn "No --github-pat provided — clone may fail if repos are private"
+  fi
+
+  # Pre-flight SSH connectivity check (fail fast, before any real work)
+  if [ "$DRY_RUN" = "0" ]; then
+    # shellcheck disable=SC2086
+    if ! ssh $SSH_OPTS "${TARGET_USER}@${TARGET_HOST}" 'echo ok' >/dev/null 2>&1; then
+      err "Cannot reach ${TARGET_USER}@${TARGET_HOST} via SSH (key: ${SSH_KEY})\nCheck Tailscale: tailscale status | grep ${TARGET_HOST}"
+    fi
+    info "SSH OK: ${TARGET_USER}@${TARGET_HOST}"
+  fi
 fi
 
 # ── Step 1: Prerequisites ─────────────────────────────────────────────────────
@@ -296,15 +337,49 @@ info "Project dir: ${PROJECT_DIR}"
 info "Telegram:    $([ -n "${TELEGRAM_TOKEN:-}" ] && echo 'configured' || echo 'skipped')"
 info "Nexus:       $([ -n "${NEXUS_URL:-}" ] && echo "${NEXUS_URL}" || echo 'skipped')"
 
+# Resolve INSTALL_ROOT early (needed by Step 2b clone and all subsequent steps)
+INSTALL_ROOT="$PROJECT_DIR"
+if [ "$REMOTE" = "1" ] && [ -z "$INSTALL_PATH" ]; then
+  INSTALL_PATH="/home/${TARGET_USER}/lain/${AGENT_NAME}"
+fi
+[ "$REMOTE" = "1" ] && INSTALL_ROOT="$INSTALL_PATH"
+
+info "Install root: ${INSTALL_ROOT}"
+
+# ── Step 2b: Clone/pull blank_node repo on remote ────────────────────────────
+# (local mode: already running from the repo — skip)
+
+if [ "$REMOTE" = "1" ]; then
+  step "2b: Clone/pull blank_node on ${TARGET_USER}@${TARGET_HOST}"
+  if [ "$DRY_RUN" = "1" ]; then
+    dry "git clone/pull ${CLONE_URL} → ${INSTALL_ROOT}"
+  else
+    # shellcheck disable=SC2086
+    ssh $SSH_OPTS "${TARGET_USER}@${TARGET_HOST}" "bash -s" << CLONE_SCRIPT
+set -euo pipefail
+INSTALL_ROOT="${INSTALL_ROOT}"
+CLONE_URL="${CLONE_URL}"
+
+if [ -d "\${INSTALL_ROOT}/.git" ]; then
+  echo "  Repo exists — pulling latest"
+  git -C "\${INSTALL_ROOT}" pull --quiet 2>&1 \
+    | sed 's|https://[^@]*@|https://[PAT]@|g' || true
+  echo "  git pull OK"
+else
+  echo "  Cloning → \${INSTALL_ROOT}"
+  mkdir -p "\$(dirname "\${INSTALL_ROOT}")"
+  git clone --quiet "\${CLONE_URL}" "\${INSTALL_ROOT}" 2>&1 \
+    | sed 's|https://[^@]*@|https://[PAT]@|g'
+  echo "  git clone OK"
+fi
+CLONE_SCRIPT
+    info "Repository ready on remote: ${INSTALL_ROOT}"
+  fi
+fi
+
 # ── Step 3: Directory scaffold ────────────────────────────────────────────────
 
 step "3: Directory scaffold"
-
-INSTALL_ROOT="$PROJECT_DIR"
-if [ "$REMOTE" = "1" ] && [ -z "$INSTALL_PATH" ]; then
-  INSTALL_PATH="/home/${TARGET_USER}/${AGENT_NAME}"
-fi
-[ "$REMOTE" = "1" ] && INSTALL_ROOT="$INSTALL_PATH"
 
 for dir in state logs memory/sessions memory/work identity inbox/files; do
   if [ "$REMOTE" = "1" ]; then
@@ -613,13 +688,14 @@ else
     fi
   }
 
-  # Helper: copy a local file to local or remote destination
+  # Helper: copy a file to local or remote destination.
+  # Remote: derive the remote src path from the local path (repo was cloned to INSTALL_ROOT).
   _copy_unit_file() {
     local src="$1"
     local dest="$2"
     if [ "$REMOTE" = "1" ]; then
-      cat "$src" | ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-        "${TARGET_USER}@${TARGET_HOST}" "cat > '${dest}'"
+      local remote_src="${INSTALL_ROOT}${src#$PROJECT_DIR}"
+      ssh_run "cp -f '${remote_src}' '${dest}'"
     else
       cp -f "$src" "$dest"
     fi
@@ -805,6 +881,8 @@ if [ "$SKIP_LOOM" = "1" ]; then
 else
   # Each agent gets its own Loom clone (pinned, no shared ~/lain/loom dependency)
   LOOM_REPO="${LOOM_REPO:-https://github.com/lainiwakuraagent-lgtm/loom.git}"
+  # Use PAT-authenticated URL for remote if available (set in early-validation block)
+  _LOOM_CLONE_URL="${LOOM_CLONE_URL:-$LOOM_REPO}"
   AGENT_LOOM_DIR="${INSTALL_ROOT}/loom"
   AGENT_LOOM_WRAPPER="${INSTALL_ROOT}/bin/loom"
 
@@ -827,7 +905,8 @@ else
         ssh_run "git -C '${AGENT_LOOM_DIR}' pull --quiet 2>&1 | head -5" || warn "Loom pull failed"
       else
         info "Cloning loom → ${AGENT_LOOM_DIR} (remote)"
-        ssh_run "git clone --quiet '${LOOM_REPO}' '${AGENT_LOOM_DIR}' 2>&1" \
+        ssh_run "git clone --quiet '${_LOOM_CLONE_URL}' '${AGENT_LOOM_DIR}' 2>&1 \
+          | sed 's|https://[^@]*@|https://[PAT]@|g'" \
           || warn "Could not clone loom on remote. Skipping Loom setup."
       fi
 
@@ -938,9 +1017,41 @@ WRAPPER
   fi
 fi
 
-# ── Steps 9: smoke test + persona ────────────────────────────────────────────
+# ── Steps 9+: smoke test + persona ────────────────────────────────────────────
 # (implemented in subsequent tasks: T440, T442)
 step "9: Remaining steps (not yet implemented)"
-warn "Steps 9 not yet implemented (smoke test + persona capture)."
+warn "Steps 9+ not yet implemented (smoke test + persona capture)."
 warn "Steps done so far: prerequisites ✓  directories ✓  agent_config.env ✓  credentials ✓  nexus ✓  systemd ✓  loom ✓"
+
+if [ "$REMOTE" = "1" ]; then
+  echo ""
+  echo "══════════════════════════════════════════════════════════════"
+  printf " Install complete: %s → %s@%s\n" "${AGENT_NAME}" "${TARGET_USER}" "${TARGET_HOST}"
+  echo "══════════════════════════════════════════════════════════════"
+  echo ""
+  echo "Install path:  ${INSTALL_ROOT}"
+  echo "Nexus URL:     ${NEXUS_URL}"
+  echo ""
+  echo "NEXT STEPS:"
+  echo ""
+  if [ -z "${TELEGRAM_TOKEN:-}" ]; then
+    echo "  1. Add Telegram credentials on target:"
+    echo "     ssh ${TARGET_USER}@${TARGET_HOST}"
+    printf "     printf 'TELEGRAM_TOKEN=<token>\\nTELEGRAM_CHAT_ID=<id>\\n' > %s/identity/agent.env\n" "${INSTALL_ROOT}"
+    printf "     chmod 600 %s/identity/agent.env\n" "${INSTALL_ROOT}"
+    echo ""
+  fi
+  echo "  2. Auth Claude CLI on target (first time):"
+  echo "     ssh ${TARGET_USER}@${TARGET_HOST} 'claude auth login'"
+  echo ""
+  echo "  3. Verify the timer is running:"
+  # shellcheck disable=SC2016
+  echo "     ssh ${TARGET_USER}@${TARGET_HOST} \\"
+  echo "       'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user list-timers'"
+  echo ""
+  echo "  4. Monitor first nightly wake (fires 23:00 local time):"
+  echo "     ssh ${TARGET_USER}@${TARGET_HOST} 'tail -f ${INSTALL_ROOT}/logs/wake.log'"
+  echo ""
+fi
+
 exit 0
