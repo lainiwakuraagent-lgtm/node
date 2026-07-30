@@ -796,9 +796,151 @@ WantedBy=default.target"
   fi
 fi
 
-# ── Steps 8–9: Loom, smoke test, persona ─────────────────────────────────────
-# (implemented in subsequent tasks: T438–T440)
-step "8–9: Remaining steps (not yet implemented)"
-warn "Steps 8–9 are not yet implemented."
-warn "Steps done so far: prerequisites ✓  directories ✓  agent_config.env ✓  credentials ✓  nexus ✓  systemd ✓"
+# ── Step 8: Loom setup ────────────────────────────────────────────────────────
+
+step "8: Loom setup"
+
+if [ "$SKIP_LOOM" = "1" ]; then
+  info "SKIP — --skip-loom flag set"
+else
+  # Each agent gets its own Loom clone (pinned, no shared ~/lain/loom dependency)
+  LOOM_REPO="${LOOM_REPO:-https://github.com/lainiwakuraagent-lgtm/loom.git}"
+  AGENT_LOOM_DIR="${INSTALL_ROOT}/loom"
+  AGENT_LOOM_WRAPPER="${INSTALL_ROOT}/bin/loom"
+
+  if [ "$DRY_RUN" = "1" ]; then
+    dry "mkdir -p '${INSTALL_ROOT}/bin'"
+    dry "Clone loom → ${AGENT_LOOM_DIR}  (or pull if already present)"
+    dry "python3 -m venv ${AGENT_LOOM_DIR}/.venv && pip install -e ${AGENT_LOOM_DIR}"
+    dry "mkdir -p $(dirname "${LOOM_DB}")"
+    dry "Run init migration against ${LOOM_DB}"
+    dry "Write per-agent wrapper → ${AGENT_LOOM_WRAPPER}"
+    dry "Verify loom DB is reachable (goal count query)"
+  else
+    if [ "$REMOTE" = "1" ]; then
+      # ── Remote Loom setup ──────────────────────────────────────────────────
+      ssh_run "mkdir -p '${INSTALL_ROOT}/bin'"
+
+      # Clone or pull
+      if ssh_run "[ -d '${AGENT_LOOM_DIR}/.git' ]" 2>/dev/null; then
+        info "Loom repo exists (remote) — pulling"
+        ssh_run "git -C '${AGENT_LOOM_DIR}' pull --quiet 2>&1 | head -5" || warn "Loom pull failed"
+      else
+        info "Cloning loom → ${AGENT_LOOM_DIR} (remote)"
+        ssh_run "git clone --quiet '${LOOM_REPO}' '${AGENT_LOOM_DIR}' 2>&1" \
+          || warn "Could not clone loom on remote. Skipping Loom setup."
+      fi
+
+      # Venv + install
+      if ssh_run "[ -d '${AGENT_LOOM_DIR}' ]" 2>/dev/null; then
+        if ! ssh_run "[ -f '${AGENT_LOOM_DIR}/.venv/bin/python' ]" 2>/dev/null; then
+          info "Creating loom venv (remote)"
+          ssh_run "python3 -m venv '${AGENT_LOOM_DIR}/.venv'"
+          ssh_run "'${AGENT_LOOM_DIR}/.venv/bin/pip' install --quiet -e '${AGENT_LOOM_DIR}'"
+          info "Loom installed in venv (remote)"
+        else
+          info "Loom venv exists (remote)"
+        fi
+
+        # Init DB directory + migration
+        ssh_run "mkdir -p '$(dirname "${LOOM_DB}")'"
+        ssh_run "env PYTHONPATH='${AGENT_LOOM_DIR}' \
+          '${AGENT_LOOM_DIR}/.venv/bin/python' -m loom.cli --db '${LOOM_DB}' goal list 2>/dev/null >/dev/null || true"
+        info "Loom DB initialised (remote): ${LOOM_DB}"
+
+        # Per-agent wrapper
+        _WRAPPER_CONTENT="#!/usr/bin/env bash
+# loom — per-agent wrapper for ${AGENT_NAME}
+LOOM_DIR=\"${AGENT_LOOM_DIR}\"
+LOOM_DB=\"${LOOM_DB}\"
+_loom_cli() {
+  env PYTHONPATH=\"\${LOOM_DIR}\" \"\${LOOM_DIR}/.venv/bin/python\" -m loom.cli --db \"\${LOOM_DB}\" \"\$@\"
+}
+case \"\${1:-}\" in
+  ls)   shift; _loom_cli task list --status \"\${1:-scheduled}\" ;;
+  show) _loom_cli task show \"\$2\" ;;
+  done) _loom_cli task edit --status done \"\$2\" ;;
+  fail) _loom_cli task edit --status failed \"\$2\" ;;
+  add)  shift; _loom_cli task add --name \"\${1:?name required}\" --status scheduled \"\${@:2}\" ;;
+  next) _loom_cli queue ;;
+  *)    _loom_cli \"\$@\" ;;
+esac"
+        printf '%s\n' "$_WRAPPER_CONTENT" | ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+          "${TARGET_USER}@${TARGET_HOST}" "cat > '${AGENT_LOOM_WRAPPER}' && chmod +x '${AGENT_LOOM_WRAPPER}'"
+        info "Written wrapper: ${AGENT_LOOM_WRAPPER}"
+
+        # Verify reachability
+        _goal_count=$(ssh_run "env PYTHONPATH='${AGENT_LOOM_DIR}' \
+          '${AGENT_LOOM_DIR}/.venv/bin/python' -m loom.cli --db '${LOOM_DB}' goal list 2>/dev/null | { grep -c '│' || true; }" 2>/dev/null || echo "?")
+        ok "Loom reachable (remote): ${_goal_count} goal row(s) in DB"
+      fi
+    else
+      # ── Local Loom setup ───────────────────────────────────────────────────
+      mkdir -p "${INSTALL_ROOT}/bin"
+
+      # Clone or pull
+      if [ -d "${AGENT_LOOM_DIR}/.git" ]; then
+        info "Loom repo exists — pulling"
+        git -C "$AGENT_LOOM_DIR" pull --quiet 2>&1 | head -5 || warn "Loom pull failed"
+      else
+        info "Cloning loom → ${AGENT_LOOM_DIR}"
+        git clone --quiet "$LOOM_REPO" "$AGENT_LOOM_DIR" 2>&1 \
+          || { warn "Could not clone loom. Skipping Loom setup."; SKIP_LOOM=1; }
+      fi
+
+      if [ "${SKIP_LOOM}" = "0" ] && [ -d "$AGENT_LOOM_DIR" ]; then
+        # Venv + install
+        if [ ! -f "${AGENT_LOOM_DIR}/.venv/bin/python" ]; then
+          info "Creating loom venv"
+          python3 -m venv "${AGENT_LOOM_DIR}/.venv"
+          "${AGENT_LOOM_DIR}/.venv/bin/pip" install --quiet -e "$AGENT_LOOM_DIR"
+          info "Loom installed in venv"
+        else
+          info "Loom venv exists"
+        fi
+
+        # Init DB directory + run migration via first query
+        mkdir -p "$(dirname "${LOOM_DB}")"
+        env PYTHONPATH="${AGENT_LOOM_DIR}" \
+          "${AGENT_LOOM_DIR}/.venv/bin/python" -m loom.cli --db "${LOOM_DB}" \
+          goal list >/dev/null 2>&1 || true
+        info "Loom DB initialised: ${LOOM_DB}"
+
+        # Per-agent wrapper at bin/loom
+        cat > "${AGENT_LOOM_WRAPPER}" << WRAPPER
+#!/usr/bin/env bash
+# loom — per-agent wrapper for ${AGENT_NAME}
+LOOM_DIR="${AGENT_LOOM_DIR}"
+LOOM_DB="${LOOM_DB}"
+_loom_cli() {
+  env PYTHONPATH="\${LOOM_DIR}" "\${LOOM_DIR}/.venv/bin/python" -m loom.cli --db "\${LOOM_DB}" "\$@"
+}
+case "\${1:-}" in
+  ls)   shift; _loom_cli task list --status "\${1:-scheduled}" ;;
+  show) _loom_cli task show "\$2" ;;
+  done) _loom_cli task edit --status done "\$2" ;;
+  fail) _loom_cli task edit --status failed "\$2" ;;
+  add)  shift; _loom_cli task add --name "\${1:?name required}" --status scheduled "\${@:2}" ;;
+  next) _loom_cli queue ;;
+  *)    _loom_cli "\$@" ;;
+esac
+WRAPPER
+        chmod +x "${AGENT_LOOM_WRAPPER}"
+        info "Written wrapper: ${AGENT_LOOM_WRAPPER}"
+
+        # Verify reachability — real query, not just file existence
+        _goal_count=$(env PYTHONPATH="${AGENT_LOOM_DIR}" \
+          "${AGENT_LOOM_DIR}/.venv/bin/python" -m loom.cli --db "${LOOM_DB}" \
+          goal list 2>/dev/null | { grep -c "│" || true; })
+        ok "Loom reachable: ${_goal_count} goal row(s) in DB"
+      fi
+    fi
+  fi
+fi
+
+# ── Steps 9: smoke test + persona ────────────────────────────────────────────
+# (implemented in subsequent tasks: T440, T442)
+step "9: Remaining steps (not yet implemented)"
+warn "Steps 9 not yet implemented (smoke test + persona capture)."
+warn "Steps done so far: prerequisites ✓  directories ✓  agent_config.env ✓  credentials ✓  nexus ✓  systemd ✓  loom ✓"
 exit 0

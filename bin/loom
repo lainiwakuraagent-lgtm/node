@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# loom — per-agent wrapper for t438-test2
+LOOM_DIR="/home/andrii/lain/blank_node/loom"
+LOOM_DB="/home/andrii/.local/share/loom/t438-test2.db"
+_loom_cli() {
+  env PYTHONPATH="${LOOM_DIR}" "${LOOM_DIR}/.venv/bin/python" -m loom.cli --db "${LOOM_DB}" "$@"
+}
+case "${1:-}" in
+  ls)   shift; _loom_cli task list --status "${1:-scheduled}" ;;
+  show) _loom_cli task show "$2" ;;
+  done) _loom_cli task edit --status done "$2" ;;
+  fail) _loom_cli task edit --status failed "$2" ;;
+  add)  shift; _loom_cli task add --name "${1:?name required}" --status scheduled "${@:2}" ;;
+  next) _loom_cli queue ;;
+  *)    _loom_cli "$@" ;;
+esac
