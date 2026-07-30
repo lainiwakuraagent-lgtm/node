@@ -1017,41 +1017,137 @@ WRAPPER
   fi
 fi
 
-# ── Steps 9+: smoke test + persona ────────────────────────────────────────────
-# (implemented in subsequent tasks: T440, T442)
-step "9: Remaining steps (not yet implemented)"
-warn "Steps 9+ not yet implemented (smoke test + persona capture)."
-warn "Steps done so far: prerequisites ✓  directories ✓  agent_config.env ✓  credentials ✓  nexus ✓  systemd ✓  loom ✓"
+# ── Step 9: Smoke test ────────────────────────────────────────────────────────
+# Lightweight file-integrity check — not a full agent run.
 
+step "9: Smoke test"
+
+_SMOKE_PASS=1
+_smoke_check() {
+  local label="$1" path="$2"
+  if [ "$REMOTE" = "1" ]; then
+    if ssh_run "[ -e '${path}' ]" 2>/dev/null; then
+      ok "  ${label}"
+    else
+      warn "MISSING: ${label} — ${path}"
+      _SMOKE_PASS=0
+    fi
+  else
+    if [ -e "${path}" ]; then
+      ok "  ${label}"
+    else
+      warn "MISSING: ${label} — ${path}"
+      _SMOKE_PASS=0
+    fi
+  fi
+}
+
+if [ "$DRY_RUN" = "1" ]; then
+  dry "Verify key files exist at ${INSTALL_ROOT}"
+else
+  _smoke_check "scripts/executional/wake.sh"        "${INSTALL_ROOT}/scripts/executional/wake.sh"
+  _smoke_check "scripts/executional/resolve_session_type.py" \
+    "${INSTALL_ROOT}/scripts/executional/resolve_session_type.py"
+  _smoke_check "prompts/wrapper_prompt.md"           "${INSTALL_ROOT}/prompts/wrapper_prompt.md"
+  _smoke_check "state/agent_config.env"              "${INSTALL_ROOT}/state/agent_config.env"
+  _smoke_check "bin/loom wrapper"                    "${INSTALL_ROOT}/bin/loom"
+  _smoke_check "inbox/pending.json"                  "${INSTALL_ROOT}/inbox/pending.json"
+
+  if [ "$_SMOKE_PASS" = "1" ]; then
+    ok "Smoke test PASS — key files present"
+  else
+    warn "Smoke test: one or more files missing. Check ${INSTALL_ROOT} for gaps."
+  fi
+fi
+
+# ── Step 10: Summary + next steps ─────────────────────────────────────────────
+
+step "10: Summary"
+
+echo ""
 if [ "$REMOTE" = "1" ]; then
-  echo ""
   echo "══════════════════════════════════════════════════════════════"
   printf " Install complete: %s → %s@%s\n" "${AGENT_NAME}" "${TARGET_USER}" "${TARGET_HOST}"
   echo "══════════════════════════════════════════════════════════════"
-  echo ""
-  echo "Install path:  ${INSTALL_ROOT}"
-  echo "Nexus URL:     ${NEXUS_URL}"
-  echo ""
-  echo "NEXT STEPS:"
-  echo ""
-  if [ -z "${TELEGRAM_TOKEN:-}" ]; then
-    echo "  1. Add Telegram credentials on target:"
+else
+  echo "══════════════════════════════════════════════════════════════"
+  printf " Install complete: %s (local)\n" "${AGENT_NAME}"
+  echo "══════════════════════════════════════════════════════════════"
+fi
+echo ""
+echo "  Install path:  ${INSTALL_ROOT}"
+echo "  Loom DB:       ${LOOM_DB}"
+echo "  Loom wrapper:  ${INSTALL_ROOT}/bin/loom"
+[ -n "${NEXUS_URL:-}" ] && echo "  Nexus URL:     ${NEXUS_URL}"
+echo ""
+echo "NEXT STEPS:"
+echo ""
+
+_step=1
+if [ -z "${TELEGRAM_TOKEN:-}" ]; then
+  if [ "$REMOTE" = "1" ]; then
+    printf "  %d. Add Telegram credentials on target:\n" "$_step"
     echo "     ssh ${TARGET_USER}@${TARGET_HOST}"
-    printf "     printf 'TELEGRAM_TOKEN=<token>\\nTELEGRAM_CHAT_ID=<id>\\n' > %s/identity/agent.env\n" "${INSTALL_ROOT}"
-    printf "     chmod 600 %s/identity/agent.env\n" "${INSTALL_ROOT}"
-    echo ""
+    echo "     cat > ${INSTALL_ROOT}/identity/agent.env << 'EOF'"
+    echo "     TELEGRAM_TOKEN=<bot-token>"
+    echo "     TELEGRAM_CHAT_ID=<your-chat-id>"
+    echo "     EOF"
+    echo "     chmod 600 ${INSTALL_ROOT}/identity/agent.env"
+  else
+    printf "  %d. Add Telegram credentials:\n" "$_step"
+    echo "     cat > ${INSTALL_ROOT}/identity/agent.env << 'EOF'"
+    echo "     TELEGRAM_TOKEN=<bot-token>"
+    echo "     TELEGRAM_CHAT_ID=<your-chat-id>"
+    echo "     EOF"
+    echo "     chmod 600 ${INSTALL_ROOT}/identity/agent.env"
   fi
-  echo "  2. Auth Claude CLI on target (first time):"
+  echo ""
+  _step=$((_step + 1))
+fi
+
+if [ "$REMOTE" = "1" ]; then
+  printf "  %d. Auth Claude CLI on target (first time):\n" "$_step"
   echo "     ssh ${TARGET_USER}@${TARGET_HOST} 'claude auth login'"
   echo ""
-  echo "  3. Verify the timer is running:"
+  _step=$((_step + 1))
+  printf "  %d. Verify the timer is running:\n" "$_step"
   # shellcheck disable=SC2016
   echo "     ssh ${TARGET_USER}@${TARGET_HOST} \\"
-  echo "       'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user list-timers'"
+  echo "       'XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user list-timers | grep ${AGENT_NAME}'"
   echo ""
-  echo "  4. Monitor first nightly wake (fires 23:00 local time):"
+  _step=$((_step + 1))
+  printf "  %d. Manage tasks with loom (on target):\n" "$_step"
+  echo "     ssh ${TARGET_USER}@${TARGET_HOST}"
+  echo "     ${INSTALL_ROOT}/bin/loom goal list --all"
+  echo "     ${INSTALL_ROOT}/bin/loom ls               # scheduled tasks"
+  echo ""
+  _step=$((_step + 1))
+  printf "  %d. Monitor first nightly wake (fires 23:00 local time):\n" "$_step"
   echo "     ssh ${TARGET_USER}@${TARGET_HOST} 'tail -f ${INSTALL_ROOT}/logs/wake.log'"
+else
+  printf "  %d. Auth Claude CLI (if not already done):\n" "$_step"
+  echo "     claude auth login"
   echo ""
+  _step=$((_step + 1))
+  if [ "$SYSTEMD_AVAILABLE" = "1" ]; then
+    printf "  %d. Verify the timer is running:\n" "$_step"
+    echo "     systemctl --user list-timers | grep ${AGENT_NAME}"
+    echo ""
+    _step=$((_step + 1))
+  fi
+  printf "  %d. Manage tasks with loom:\n" "$_step"
+  echo "     ${INSTALL_ROOT}/bin/loom goal list --all"
+  echo "     ${INSTALL_ROOT}/bin/loom ls               # scheduled tasks"
+  echo ""
+  _step=$((_step + 1))
+  if [ "$SYSTEMD_AVAILABLE" = "1" ]; then
+    printf "  %d. Monitor first nightly wake (fires 23:00 local time):\n" "$_step"
+    echo "     tail -f ${INSTALL_ROOT}/logs/wake.log"
+  else
+    printf "  %d. Launch a manual session:\n" "$_step"
+    echo "     TRIGGER_MODE=manual bash ${INSTALL_ROOT}/scripts/executional/wake.sh"
+  fi
 fi
+echo ""
 
 exit 0
