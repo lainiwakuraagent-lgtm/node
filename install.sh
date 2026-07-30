@@ -258,8 +258,170 @@ else
 fi
 
 # ── Step 2: Configuration ─────────────────────────────────────────────────────
-# (implemented in subsequent task: install.sh — directory scaffold + agent_config.env)
-step "2: Configuration (not yet implemented — run local_setup.sh for now)"
-warn "Steps 2–9 are not yet implemented in this skeleton."
-warn "Use scripts/local_setup.sh for local installs until install.sh is complete."
+
+step "2: Configuration"
+
+if [ "$NON_INTERACTIVE" = "0" ] && [ "$DRY_RUN" = "0" ] && [ "$REMOTE" = "0" ]; then
+  printf "\n  Configure your agent. Press Enter to accept defaults.\n\n"
+fi
+
+prompt_value AGENT_NAME "Agent name (slug, e.g. 'my-agent')" ""
+prompt_value OWNER_NAME "Owner name" "andrii"
+
+if [[ ! "$AGENT_NAME" =~ ^[a-z0-9_-]+$ ]]; then
+  err "AGENT_NAME must be lowercase letters, digits, hyphens, or underscores only"
+fi
+
+if [ "$SKIP_TELEGRAM" = "0" ]; then
+  if [ "$NON_INTERACTIVE" = "0" ]; then
+    printf "  (Leave Telegram token blank to skip Telegram setup)\n"
+  fi
+  prompt_value TELEGRAM_TOKEN "Telegram bot token" "" 2>/dev/null || true
+  if [ -n "${TELEGRAM_TOKEN:-}" ]; then
+    prompt_value TELEGRAM_CHAT_ID "Telegram chat ID (your user ID)" ""
+  fi
+fi
+
+if [ "$SKIP_NEXUS" = "0" ]; then
+  if [ "$NON_INTERACTIVE" = "0" ]; then
+    printf "  (Leave Nexus URL blank to skip Nexus setup)\n"
+  fi
+  prompt_value NEXUS_URL "Nexus URL" "$NEXUS_URL" 2>/dev/null || true
+  if [ -n "${NEXUS_URL:-}" ]; then
+    prompt_value NEXUS_PASSWORD "Nexus password" ""
+  fi
+fi
+
+info "Agent name:  ${AGENT_NAME}"
+info "Owner name:  ${OWNER_NAME}"
+info "Project dir: ${PROJECT_DIR}"
+info "Telegram:    $([ -n "${TELEGRAM_TOKEN:-}" ] && echo 'configured' || echo 'skipped')"
+info "Nexus:       $([ -n "${NEXUS_URL:-}" ] && echo "${NEXUS_URL}" || echo 'skipped')"
+
+# ── Step 3: Directory scaffold ────────────────────────────────────────────────
+
+step "3: Directory scaffold"
+
+INSTALL_ROOT="$PROJECT_DIR"
+if [ "$REMOTE" = "1" ] && [ -z "$INSTALL_PATH" ]; then
+  INSTALL_PATH="/home/${TARGET_USER}/${AGENT_NAME}"
+fi
+[ "$REMOTE" = "1" ] && INSTALL_ROOT="$INSTALL_PATH"
+
+for dir in state logs memory/sessions memory/work identity inbox/files; do
+  if [ "$REMOTE" = "1" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+      dry "mkdir -p ${INSTALL_ROOT}/${dir}"
+    else
+      ssh_run "mkdir -p '${INSTALL_ROOT}/${dir}'"
+      info "Created (remote): ${dir}/"
+    fi
+  else
+    if [ ! -d "${INSTALL_ROOT}/${dir}" ]; then
+      if [ "$DRY_RUN" = "1" ]; then
+        dry "mkdir -p ${INSTALL_ROOT}/${dir}"
+      else
+        mkdir -p "${INSTALL_ROOT}/${dir}"
+        info "Created: ${dir}/"
+      fi
+    else
+      info "Exists:  ${dir}/"
+    fi
+  fi
+done
+
+# Counter and state files (idempotent)
+_init_file() {
+  local path="$1" content="$2"
+  if [ "$REMOTE" = "1" ]; then
+    [ "$DRY_RUN" = "1" ] \
+      && dry "[ -f '${path}' ] || echo '${content}' > '${path}'" \
+      || ssh_run "[ -f '${path}' ] || echo '${content}' > '${path}'"
+  else
+    if [ ! -f "${path}" ]; then
+      if [ "$DRY_RUN" = "1" ]; then
+        dry "echo '${content}' > '${path}'"
+      else
+        echo "${content}" > "${path}"
+        info "Initialized: ${path#$INSTALL_ROOT/}"
+      fi
+    fi
+  fi
+}
+
+_init_file "${INSTALL_ROOT}/state/sessions_tonight.count" "0"
+_init_file "${INSTALL_ROOT}/state/sessions_emergency.count" "0"
+_init_file "${INSTALL_ROOT}/state/sessions_manual.count" "0"
+_init_file "${INSTALL_ROOT}/state/sessions_tonight.date" "$(date +%Y-%m-%d)"
+_init_file "${INSTALL_ROOT}/state/trigger_mode.txt" "manual"
+
+if [ "$REMOTE" = "1" ]; then
+  [ "$DRY_RUN" = "1" ] \
+    && dry "[ -f '${INSTALL_ROOT}/inbox/pending.json' ] || echo '[]' > '${INSTALL_ROOT}/inbox/pending.json'" \
+    || ssh_run "[ -f '${INSTALL_ROOT}/inbox/pending.json' ] || echo '[]' > '${INSTALL_ROOT}/inbox/pending.json'"
+else
+  if [ ! -f "${INSTALL_ROOT}/inbox/pending.json" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+      dry "echo '[]' > ${INSTALL_ROOT}/inbox/pending.json"
+    else
+      echo "[]" > "${INSTALL_ROOT}/inbox/pending.json"
+      info "Initialized: inbox/pending.json"
+    fi
+  fi
+fi
+
+# ── Step 4: agent_config.env ──────────────────────────────────────────────────
+
+step "4: agent_config.env"
+
+AGENT_CONFIG="${INSTALL_ROOT}/state/agent_config.env"
+LOOM_DB="${HOME}/.local/share/loom/${AGENT_NAME}.db"
+[ "$REMOTE" = "1" ] && LOOM_DB="/home/${TARGET_USER}/.local/share/loom/${AGENT_NAME}.db"
+EXAMPLE_FILE="${PROJECT_DIR}/state/agent_config.env.example"
+RESOLVED_MODEL="${MODEL:-claude-sonnet-4-6}"
+
+if [ ! -f "$EXAMPLE_FILE" ]; then
+  warn "agent_config.env.example not found at ${EXAMPLE_FILE} — writing minimal config"
+  if [ "$DRY_RUN" = "0" ] && [ "$REMOTE" = "0" ]; then
+    cat > "$AGENT_CONFIG" << EOF
+AGENT_NAME=${AGENT_NAME}
+OWNER_NAME=${OWNER_NAME}
+NODE_VERSION=${RESOLVED_MODEL}
+EXECUTION_TASK_CAP=2
+LOOM_DB=${LOOM_DB}
+EOF
+    info "Written: state/agent_config.env (minimal — example missing)"
+  else
+    dry "Write minimal state/agent_config.env (AGENT_NAME, OWNER_NAME, NODE_VERSION, LOOM_DB)"
+  fi
+else
+  # Substitute into the example template so no fields are silently dropped.
+  # Strategy: sed-replace known placeholder tokens; preserve comment lines and
+  # optional settings (DEFAULT_GOAL_ID, AGENT_REPO) as-is with their comments.
+  GENERATED_CONFIG="$(sed \
+    -e "s|^AGENT_NAME=.*|AGENT_NAME=${AGENT_NAME}|" \
+    -e "s|^OWNER_NAME=.*|OWNER_NAME=${OWNER_NAME}|" \
+    -e "s|^AGENT_REPO=.*|AGENT_REPO=${AGENT_NAME}-node|" \
+    -e "s|^NODE_VERSION=.*|NODE_VERSION=${RESOLVED_MODEL}|" \
+    -e "s|^LOOM_DB=.*|LOOM_DB=${LOOM_DB}|" \
+    "$EXAMPLE_FILE")"
+
+  if [ "$DRY_RUN" = "1" ]; then
+    dry "Write state/agent_config.env (from .example, substituting AGENT_NAME/OWNER_NAME/NODE_VERSION/LOOM_DB)"
+  elif [ "$REMOTE" = "1" ]; then
+    ssh_run "cat > '${AGENT_CONFIG}'" <<< "$GENERATED_CONFIG"
+    info "Written (remote): state/agent_config.env"
+  else
+    echo "$GENERATED_CONFIG" > "$AGENT_CONFIG"
+    info "Written: state/agent_config.env"
+    info "  AGENT_REPO set to '${AGENT_NAME}-node' — update if your repo name differs"
+    info "  DEFAULT_GOAL_ID: left commented out — uncomment when you have a goal in Loom"
+  fi
+fi
+
+# ── Steps 5–9: Credentials, Nexus, Loom, systemd, smoke test ─────────────────
+# (implemented in subsequent tasks: T436–T440)
+step "5–9: Remaining steps (not yet implemented)"
+warn "Steps 5–9 are not yet implemented — run scripts/local_setup.sh for the full setup."
+warn "Steps done so far: prerequisites ✓  directories ✓  agent_config.env ✓"
 exit 0
