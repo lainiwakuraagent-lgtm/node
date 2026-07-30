@@ -29,6 +29,7 @@
 #   --skip-telegram            Skip Telegram credential setup
 #   --skip-nexus               Skip Nexus registration
 #   --skip-loom                Skip Loom clone/venv (use existing install if present)
+#   --skip-khal                Skip khal calendar setup
 #   --non-interactive          Never prompt; read from env vars; fail on missing required values
 #   --dry-run                  Print what would happen; make no changes
 #   --remote                   Install on a remote host over SSH
@@ -56,6 +57,7 @@ NEXUS_PASSWORD="${NEXUS_PASSWORD:-}"
 SKIP_TELEGRAM=0
 SKIP_NEXUS=0
 SKIP_LOOM=0
+SKIP_KHAL=0
 NON_INTERACTIVE=0
 DRY_RUN=0
 
@@ -105,6 +107,7 @@ Flags:
   --skip-telegram            Skip Telegram credential setup
   --skip-nexus               Skip Nexus registration
   --skip-loom                Skip Loom clone/venv (use existing)
+  --skip-khal                Skip khal calendar setup
   --non-interactive          Never prompt; read from env; fail on missing
   --dry-run                  Print what would happen; make no changes
   --remote                   Install on a remote host over SSH
@@ -187,6 +190,7 @@ while [[ $# -gt 0 ]]; do
     --skip-telegram)     SKIP_TELEGRAM=1;          shift ;;
     --skip-nexus)        SKIP_NEXUS=1;             shift ;;
     --skip-loom)         SKIP_LOOM=1;              shift ;;
+    --skip-khal)         SKIP_KHAL=1;              shift ;;
     --non-interactive)   NON_INTERACTIVE=1;        shift ;;
     --dry-run)           DRY_RUN=1;               shift ;;
     --remote)            REMOTE=1;                 shift ;;
@@ -1065,6 +1069,123 @@ WRAPPER
   fi
 fi
 
+# ── Step 8b: khal calendar setup ─────────────────────────────────────────────
+
+step "8b: khal calendar setup"
+
+if [ "$SKIP_KHAL" = "1" ]; then
+  info "SKIP — --skip-khal flag set"
+else
+  KHAL_CALENDAR_DIR="${INSTALL_ROOT}/state/calendar/${AGENT_NAME}"
+  KHAL_CONFIG="${INSTALL_ROOT}/config/khal.cfg"
+  KHAL_DB="${INSTALL_ROOT}/state/khal.db"
+  KHAL_WRAPPER="${INSTALL_ROOT}/bin/khal"
+
+  _build_khal_config() {
+    local cal_dir="$1" db_path="$2" agent="$3"
+    printf '[calendars]\n\n[[%s]]\npath = %s/\ncolor = auto\n\n[sqlite]\npath = %s\n\n[locale]\ntimeformat = %%H:%%M\ndateformat = %%Y-%%m-%%d\ndatetimeformat = %%Y-%%m-%%d %%H:%%M\nfirstweekday = 0\n' \
+      "$agent" "$cal_dir" "$db_path"
+  }
+
+  if [ "$DRY_RUN" = "1" ]; then
+    dry "Install khal (pip3 install --user khal or apt-get install khal)"
+    dry "mkdir -p ${KHAL_CALENDAR_DIR}"
+    dry "mkdir -p ${INSTALL_ROOT}/config"
+    dry "Write ${KHAL_CONFIG}"
+    dry "Write ${KHAL_WRAPPER}"
+  elif [ "$REMOTE" = "1" ]; then
+    # ── Remote khal install ──────────────────────────────────────────────────
+    _khal_bin_remote=""
+    if ssh_run "command -v khal >/dev/null 2>&1"; then
+      _khal_bin_remote="khal"
+      info "khal already installed (remote)"
+    elif ssh_run "[ -f ~/.local/bin/khal ]" 2>/dev/null; then
+      _khal_bin_remote="~/.local/bin/khal"
+      info "khal already installed at ~/.local/bin/khal (remote)"
+    else
+      info "Installing khal on ${TARGET_USER}@${TARGET_HOST} ..."
+      if ssh_run "pip3 install --user --break-system-packages khal >/dev/null 2>&1 \
+                  || pip3 install --user khal >/dev/null 2>&1" 2>/dev/null; then
+        _khal_bin_remote='${HOME}/.local/bin/khal'
+        ok "khal installed via pip (remote)"
+      elif ssh_run "apt-get install -y khal >/dev/null 2>&1" 2>/dev/null; then
+        _khal_bin_remote="khal"
+        ok "khal installed via apt (remote)"
+      else
+        warn "khal install failed on remote — skip calendar setup. Install manually: pip3 install --user khal"
+        _khal_bin_remote=""
+      fi
+    fi
+
+    if [ -n "$_khal_bin_remote" ]; then
+      ssh_run "mkdir -p '${KHAL_CALENDAR_DIR}'"
+      ssh_run "mkdir -p '${INSTALL_ROOT}/config'"
+
+      _khal_cfg=$(_build_khal_config "${KHAL_CALENDAR_DIR}" "${KHAL_DB}" "${AGENT_NAME}")
+      printf '%s\n' "$_khal_cfg" | \
+        ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+        "${TARGET_USER}@${TARGET_HOST}" "cat > '${KHAL_CONFIG}'"
+      info "Written (remote): config/khal.cfg"
+
+      _khal_wrap="#!/usr/bin/env bash
+# khal wrapper for agent: ${AGENT_NAME}
+exec \"${_khal_bin_remote}\" -c \"${KHAL_CONFIG}\" \"\$@\""
+      printf '%s\n' "$_khal_wrap" | \
+        ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+        "${TARGET_USER}@${TARGET_HOST}" "cat > '${KHAL_WRAPPER}' && chmod +x '${KHAL_WRAPPER}'"
+      info "Written (remote): bin/khal"
+
+      if ssh_run "'${KHAL_WRAPPER}' printcalendars >/dev/null 2>&1" 2>/dev/null; then
+        ok "khal calendar ready (remote): ${KHAL_CALENDAR_DIR}"
+      else
+        warn "khal installed (remote) but verification failed — check ${KHAL_CONFIG}"
+      fi
+    fi
+  else
+    # ── Local khal install ───────────────────────────────────────────────────
+    _khal_bin=""
+    if command -v khal >/dev/null 2>&1; then
+      _khal_bin="$(command -v khal)"
+      info "khal already installed: ${_khal_bin}"
+    elif [ -f "${HOME}/.local/bin/khal" ]; then
+      _khal_bin="${HOME}/.local/bin/khal"
+      info "khal already installed (user): ${_khal_bin}"
+    else
+      info "Installing khal ..."
+      if pip3 install --user --break-system-packages khal >/dev/null 2>&1 \
+         || pip3 install --user khal >/dev/null 2>&1; then
+        _khal_bin="${HOME}/.local/bin/khal"
+        ok "khal installed via pip: ${_khal_bin}"
+      elif apt-get install -y khal >/dev/null 2>&1; then
+        _khal_bin="$(command -v khal)"
+        ok "khal installed via apt: ${_khal_bin}"
+      else
+        warn "khal install failed — calendar setup skipped. Install manually: pip3 install --user khal"
+      fi
+    fi
+
+    if [ -n "$_khal_bin" ]; then
+      mkdir -p "${KHAL_CALENDAR_DIR}"
+      mkdir -p "${INSTALL_ROOT}/config"
+
+      _build_khal_config "${KHAL_CALENDAR_DIR}" "${KHAL_DB}" "${AGENT_NAME}" > "${KHAL_CONFIG}"
+      info "Written: config/khal.cfg"
+
+      printf '#!/usr/bin/env bash\n# khal wrapper for agent: %s\nexec "%s" -c "%s" "$@"\n' \
+        "${AGENT_NAME}" "${_khal_bin}" "${KHAL_CONFIG}" > "${KHAL_WRAPPER}"
+      chmod +x "${KHAL_WRAPPER}"
+      info "Written: bin/khal"
+
+      if "${KHAL_WRAPPER}" printcalendars >/dev/null 2>&1; then
+        ok "khal calendar ready: ${KHAL_CALENDAR_DIR}"
+        ok "khal wrapper: ${KHAL_WRAPPER}"
+      else
+        warn "khal installed but verification failed — check ${KHAL_CONFIG}"
+      fi
+    fi
+  fi
+fi
+
 # ── Step 9: Smoke test ────────────────────────────────────────────────────────
 # Lightweight file-integrity check — not a full agent run.
 
@@ -1101,6 +1222,10 @@ else
   _smoke_check "state/agent_config.env"              "${INSTALL_ROOT}/state/agent_config.env"
   _smoke_check "bin/loom wrapper"                    "${INSTALL_ROOT}/bin/loom"
   _smoke_check "inbox/pending.json"                  "${INSTALL_ROOT}/inbox/pending.json"
+  if [ "$SKIP_KHAL" = "0" ]; then
+    _smoke_check "config/khal.cfg"                   "${INSTALL_ROOT}/config/khal.cfg"
+    _smoke_check "bin/khal wrapper"                  "${INSTALL_ROOT}/bin/khal"
+  fi
 
   if [ "$_SMOKE_PASS" = "1" ]; then
     ok "Smoke test PASS — key files present"
