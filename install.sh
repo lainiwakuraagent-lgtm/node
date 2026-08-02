@@ -1268,7 +1268,7 @@ else
   _smoke_check "scripts/executional/wake.sh"        "${INSTALL_ROOT}/scripts/executional/wake.sh"
   _smoke_check "scripts/executional/resolve_session_type.py" \
     "${INSTALL_ROOT}/scripts/executional/resolve_session_type.py"
-  _smoke_check "prompts/wrapper_prompt.md"           "${INSTALL_ROOT}/prompts/wrapper_prompt.md"
+  _smoke_check "prompts/core/baseline.md"            "${INSTALL_ROOT}/prompts/core/baseline.md"
   _smoke_check "prompts/persona.txt"                 "${INSTALL_ROOT}/prompts/persona.txt"
   _smoke_check "state/agent_config.env"              "${INSTALL_ROOT}/state/agent_config.env"
   _smoke_check "bin/loom wrapper"                    "${INSTALL_ROOT}/bin/loom"

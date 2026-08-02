@@ -51,7 +51,7 @@ for f in \
   "$PROJECT_DIR/tools/executional/health_check.sh" \
   "$PROJECT_DIR/scripts/executional/wake.sh" \
   "$PROJECT_DIR/scripts/executional/splice_prompt.py" \
-  "$PROJECT_DIR/prompts/wrapper_prompt.md"
+  "$PROJECT_DIR/prompts/core/baseline.md"
 do
   if [ -f "$f" ]; then
     ok "$f"
@@ -196,7 +196,6 @@ echo ""
 echo "=== Memory ==="
 
 for f in \
-  "$PROJECT_DIR/memory/progress.md" \
   "$PROJECT_DIR/memory/learnings.md" \
   "$PROJECT_DIR/memory/index.md" \
   "$PROJECT_DIR/memory/latest_summary.md"

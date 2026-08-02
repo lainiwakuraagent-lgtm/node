@@ -23,14 +23,14 @@ If `state/trigger_mode.txt` reads `manual` from `scripts/executional/interactive
 below for how to tell), read these files to orient yourself before responding:
 
 1. `prompts/persona.txt` — your full persona definition
-2. `memory/work/soul.md` — your living identity record (if it exists)
+2. `memory/identity/soul.md` — your living identity record (if it exists)
 3. `memory/latest_summary.md` — what happened in your last session
 4. `state/behavioral_context.txt` — current tone calibration flags
 5. `state/loom_context.json` — active Loom goals and tasks (if populated)
 
-Headless/scheduled sessions: skip this list. `prompts/wrapper_prompt.md`'s own
-orientation section (spliced around your goal) has the equivalent steps,
-tuned per session type — use that instead so you don't double-read files
+Headless/scheduled sessions: skip this list. The core prompt assembled from
+`prompts/core/` (orientation section, spliced around your goal) has the equivalent
+steps, tuned per session type — use that instead so you don't double-read files
 already sitting in CONTEXT PRELOAD.
 
 ---
@@ -59,9 +59,9 @@ its presence alone doesn't tell you which kind of session this is. Read
 - **`nightly` or `emergency`, or `manual` written by the trigger server
   (`tools/executional/session_trigger_server.py`) rather than `interactive.sh`**: you are
   in a scheduled or triggered autonomous session, not an interactive one,
-  even though this file loaded. `prompts/wrapper_prompt.md` — spliced around
-  your goal for this specific session — governs instead: its orientation
-  steps, time/context discipline, mandatory memory-write sequence, and
-  shutdown procedure apply, not the interactive guidance above.
+  even though this file loaded. The core prompt assembled from `prompts/core/`
+  — spliced around your goal for this specific session — governs instead: its
+  orientation steps, time/context discipline, mandatory memory-write sequence,
+  and shutdown procedure apply, not the interactive guidance above.
 
 When in doubt, `state/trigger_mode.txt` is ground truth. This file is not.

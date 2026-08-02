@@ -105,7 +105,7 @@ echo "0" > state/sessions_manual.count
 2. Gates check: usage limit (skipped for `manual`) → time window (nightly only) → lock file
 3. Behavioral context generated from relationship state
 4. Session type resolved (execution / planning / maintenance / philosophy)
-5. Claude CLI launched with wrapper_prompt + goal + persona
+5. Claude CLI launched with prompts/core/ (baseline→orientation→memory_read→memory_write) spliced with goal + persona
 6. Agent orients, works, writes memory, shuts down cleanly
 
 ### Directory structure
@@ -167,7 +167,11 @@ node/
 │       ├── wonder_module.py         # Philosophy session exploration tool
 │       └── ...                      # More in tools/executional/
 ├── prompts/
-│   ├── wrapper_prompt.md            # Session wrapper (orientation, shutdown, memory)
+│   ├── core/                        # Session wrapper (assembled by splice_prompt.py)
+│   │   ├── baseline.md              # Identity, persona slot, session scaffolding
+│   │   ├── orientation.md           # How to orient at session start
+│   │   ├── memory_read.md           # What to read (goal slot lives here)
+│   │   └── memory_write.md          # Shutdown sequence (persona slot lives here)
 │   ├── persona.txt                  # Agent persona (YOU fill this in)
 │   │                                 # (goal lives in Loom now, not a file here)
 │   └── session_types/               # Per-type prompts (execution, planning, etc.)

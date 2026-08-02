@@ -6,13 +6,13 @@ context_files:
   - memory/latest_summary.md
   - memory/learnings_digest.md
   - state/behavioral_context.txt
-  - prompts/wrapper_prompt.md
+  - prompts/core/baseline.md
   - logs/maintenance_decisions.md
 
 focus_hint: >
-  Code & Architecture maintenance. Audit prompts/wrapper_prompt.md for accuracy
-  against how the system actually behaves now -- stale instructions, references
-  to files or tools that no longer exist. Verify wake.sh's dynamic goal text
+  Code & Architecture maintenance. Audit prompts/core/ (baseline.md, orientation.md,
+  memory_read.md, memory_write.md) for accuracy against how the system actually
+  behaves now -- stale instructions, references to files or tools that no longer exist. Verify wake.sh's dynamic goal text
   matches Loom's resolved active goal, and that DEFAULT_GOAL_ID in
   state/agent_config.env, if set, still points at a real goal.
   Check config/session_types/*.yaml for stale context_files references --
