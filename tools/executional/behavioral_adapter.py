@@ -218,6 +218,26 @@ def generate_context(state: dict) -> str:
     return '\n'.join(lines) + '\n'
 
 
+# ── Honcho supplement ────────────────────────────────────────────────────────
+
+def _load_honcho_context(peer_id: str) -> str:
+    """Read Honcho's current representation of a peer, non-fatal.
+
+    Returns a non-empty string if HONCHO_URL is configured and Honcho returns
+    a representation for this peer. Returns '' in every other case (unconfigured,
+    unreachable, no representation yet).
+    """
+    try:
+        import sys as _sys
+        _tools_dir = str(Path(__file__).parent)
+        if _tools_dir not in _sys.path:
+            _sys.path.insert(0, _tools_dir)
+        from honcho_client import honcho_read_context  # type: ignore
+        return honcho_read_context(peer_id)
+    except Exception:
+        return ''
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -248,6 +268,12 @@ def main():
         sys.exit(1)
 
     context = generate_context(state)
+
+    # Supplement with Honcho's derived peer representation if configured.
+    peer_id = user_path.stem  # e.g. "andrii" from .../andrii.md
+    honcho_ctx = _load_honcho_context(peer_id)
+    if honcho_ctx:
+        context = context.rstrip('\n') + '\n\n# HONCHO_CONTEXT\n' + honcho_ctx + '\n'
 
     if args.dry_run:
         print(context)
