@@ -14,14 +14,20 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Add scripts/ to path so we can import the module directly
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+# Add scripts/executional/ to path so we can import the module directly.
+# (Was "scripts/" before the T330 conversational/executional subdir split --
+# left the import silently broken, since the module moved but this didn't.)
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts" / "executional"))
 from resolve_session_type import (  # noqa: E402
+    _cap_is_stale,
     _check_queue_state,
+    _clear_philosophy_cap,
     _days_since_last_maintenance,
     _fetch_target_context,
     _inbox_has_pending_tasks,
+    _read_cap_active_timestamp,
     _read_default_goal_id,
+    load_type_config,
     resolve_type,
 )
 
@@ -52,19 +58,19 @@ def _make_scratch_db(db_path: Path) -> sqlite3.Connection:
         CREATE TABLE goals (
             id INTEGER PRIMARY KEY,
             name TEXT, status TEXT, priority INTEGER DEFAULT 0,
-            blocked_reason TEXT, description TEXT
+            blocked_reason TEXT, description TEXT, updated_at TEXT
         );
         CREATE TABLE projects (
             id INTEGER PRIMARY KEY,
             name TEXT, status TEXT, priority INTEGER DEFAULT 0,
-            blocked_reason TEXT, description TEXT, goal_id INTEGER
+            blocked_reason TEXT, description TEXT, goal_id INTEGER, updated_at TEXT
         );
         CREATE TABLE tasks (
             id INTEGER PRIMARY KEY,
             name TEXT, status TEXT, depends TEXT, tags TEXT,
             goal_id INTEGER, project_id INTEGER,
             blocked_reason TEXT, wait_until TEXT, urgency_score REAL DEFAULT 0,
-            priority TEXT DEFAULT 'none'
+            priority TEXT DEFAULT 'none', updated_at TEXT
         );
         """
     )
@@ -295,70 +301,74 @@ class TestInboxHasPendingTasks(unittest.TestCase):
     def test_no_inbox_file_returns_false(self):
         self.assertFalse(_inbox_has_pending_tasks(self.project_dir))
 
-    def test_task_request_unprocessed_returns_true(self):
+    def test_request_kind_task_unprocessed_returns_true(self):
         self._write_inbox([
-            {"type": "task_request", "processed": False, "content": "do X"}
+            {"type": "request", "kind": "task", "processed": False, "content": "do X"}
         ])
         self.assertTrue(_inbox_has_pending_tasks(self.project_dir))
 
-    def test_bug_report_unprocessed_returns_true(self):
+    def test_request_kind_bug_unprocessed_returns_true(self):
         self._write_inbox([
-            {"type": "bug_report", "processed": False, "content": "Y is broken"}
+            {"type": "request", "kind": "bug", "processed": False, "content": "Y is broken"}
         ])
         self.assertTrue(_inbox_has_pending_tasks(self.project_dir))
 
-    def test_task_comment_unprocessed_returns_true(self):
-        """KEY TEST: task_comment must now trigger execution (T233 fix)."""
+    def test_comment_unprocessed_returns_true(self):
+        """KEY TEST: comment must trigger execution (T233 fix, carried into the
+        2026-08-01 inbox redesign — task_comment renamed to comment)."""
         self._write_inbox([
-            {"type": "task_comment", "task_id": 231, "processed": False,
-             "text": "dig deeper into scope design"}
+            {"type": "comment", "target_type": "task", "target_id": 231, "processed": False,
+             "content": "dig deeper into scope design"}
         ])
         self.assertTrue(_inbox_has_pending_tasks(self.project_dir))
 
-    def test_task_comment_already_processed_returns_false(self):
-        """Processed task_comment must not trigger re-execution."""
+    def test_comment_already_processed_returns_false(self):
+        """Processed comment must not trigger re-execution."""
         self._write_inbox([
-            {"type": "task_comment", "task_id": 231, "processed": True,
-             "text": "dig deeper into scope design"}
+            {"type": "comment", "target_type": "task", "target_id": 231, "processed": True,
+             "content": "dig deeper into scope design"}
         ])
         self.assertFalse(_inbox_has_pending_tasks(self.project_dir))
 
     def test_context_update_does_not_trigger_execution(self):
-        """context_update is informational — should not force execution."""
+        """context_update is auto-tier (inbox.py applies it directly) — should not force execution."""
         self._write_inbox([
             {"type": "context_update", "processed": False, "content": "repo link: ..."}
         ])
         self.assertFalse(_inbox_has_pending_tasks(self.project_dir))
 
-    def test_idea_does_not_trigger_execution(self):
-        """idea entries are optional — should not force execution."""
+    def test_request_kind_idea_now_triggers(self):
+        """Redesign change: idea is now request(kind=idea), and ALL request
+        kinds are judgment-tier — an idea sitting unrouted should be as
+        visible to the dispatcher as a task, not silently invisible forever
+        the way pre-redesign `idea` entries were."""
         self._write_inbox([
-            {"type": "idea", "processed": False, "content": "what if we..."}
+            {"type": "request", "kind": "idea", "processed": False, "content": "what if we..."}
         ])
-        self.assertFalse(_inbox_has_pending_tasks(self.project_dir))
+        self.assertTrue(_inbox_has_pending_tasks(self.project_dir))
 
     def test_mixed_all_processed_returns_false(self):
         """All processed entries — should return false."""
         self._write_inbox([
-            {"type": "task_comment", "processed": True},
-            {"type": "task_request", "processed": True},
-            {"type": "bug_report", "processed": True},
+            {"type": "comment", "processed": True},
+            {"type": "request", "kind": "task", "processed": True},
+            {"type": "request", "kind": "bug", "processed": True},
         ])
         self.assertFalse(_inbox_has_pending_tasks(self.project_dir))
 
-    def test_mixed_one_unprocessed_task_comment_returns_true(self):
-        """One unprocessed task_comment among processed entries — must trigger."""
+    def test_mixed_one_unprocessed_comment_returns_true(self):
+        """One unprocessed comment among processed/auto-tier entries — must trigger."""
         self._write_inbox([
             {"type": "context_update", "processed": False},
-            {"type": "task_request", "processed": True},
-            {"type": "task_comment", "task_id": 231, "processed": False},
+            {"type": "request", "kind": "task", "processed": True},
+            {"type": "comment", "target_type": "task", "target_id": 231, "processed": False},
         ])
         self.assertTrue(_inbox_has_pending_tasks(self.project_dir))
 
     def test_entry_missing_processed_field_treated_as_unprocessed(self):
         """Entries without 'processed' field default to False (unprocessed)."""
         self._write_inbox([
-            {"type": "task_comment", "task_id": 231}
+            {"type": "comment", "target_type": "task", "target_id": 231}
         ])
         self.assertTrue(_inbox_has_pending_tasks(self.project_dir))
 
@@ -394,20 +404,22 @@ class TestResolveTypeInboxFallback(unittest.TestCase):
         self.assertEqual(session_type, "philosophy")
         self.assertEqual(source, "default")
 
-    def test_empty_queue_with_task_comment_resolves_to_execution(self):
-        """KEY TEST: task_comment in inbox overrides philosophy default."""
+    def test_empty_queue_with_comment_resolves_to_planning(self):
+        """KEY TEST: unprocessed comment in inbox → planning (T456).
+        inbox.py no longer auto-converts request/comment to Loom tasks;
+        that judgment belongs to planning, not execution."""
         self._write_inbox([
-            {"type": "task_comment", "task_id": 231, "processed": False,
-             "text": "expand the maintenance plan"}
+            {"type": "comment", "target_type": "task", "target_id": 231, "processed": False,
+             "content": "expand the maintenance plan"}
         ])
         session_type, source, reason, target = resolve_type(self.project_dir, "nightly", self.fake_db)
-        self.assertEqual(session_type, "execution")
+        self.assertEqual(session_type, "planning")
         self.assertEqual(source, "inbox_pending")
 
-    def test_processed_task_comment_still_resolves_to_philosophy(self):
+    def test_processed_comment_still_resolves_to_philosophy(self):
         """Processed comments must not loop-trigger execution."""
         self._write_inbox([
-            {"type": "task_comment", "task_id": 231, "processed": True}
+            {"type": "comment", "target_type": "task", "target_id": 231, "processed": True}
         ])
         session_type, source, reason, target = resolve_type(self.project_dir, "nightly", self.fake_db)
         self.assertEqual(session_type, "philosophy")
@@ -416,7 +428,7 @@ class TestResolveTypeInboxFallback(unittest.TestCase):
         """Priority 1: SESSION_TYPE env var must override inbox trigger."""
         import os
         self._write_inbox([
-            {"type": "task_comment", "task_id": 231, "processed": False}
+            {"type": "comment", "target_type": "task", "target_id": 231, "processed": False}
         ])
         orig = os.environ.get("SESSION_TYPE")
         try:
@@ -455,7 +467,7 @@ class TestMaintenanceFallback(unittest.TestCase):
         """Recent maintenance entry → not overdue → philosophy instead."""
         _seed_recent_maintenance(self.project_dir)
         session_type, source, reason, _ = resolve_type(self.project_dir, "nightly", self.fake_db)
-        self.assertIn(session_type, ("philosophy", "philosophy_creative", "philosophy_blocker"))
+        self.assertEqual(session_type, "philosophy")
 
     def test_days_since_last_maintenance_with_no_log(self):
         """_days_since_last_maintenance returns 999 when no log file."""
@@ -467,6 +479,211 @@ class TestMaintenanceFallback(unittest.TestCase):
         _seed_recent_maintenance(self.project_dir)
         days = _days_since_last_maintenance(self.project_dir)
         self.assertLess(days, 1.0)
+
+
+class TestPhilosophyTierResolution(unittest.TestCase):
+    """Priority 4: all three ladder rungs resolve to the single "philosophy"
+    id now (tier carried in consecutive_philosophy_count, not forked into
+    separate type ids like the old creative/blocker_resolver split)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.project_dir = Path(self.tmpdir.name)
+        (self.project_dir / "state").mkdir(parents=True)
+        (self.project_dir / "inbox").mkdir(parents=True)
+        (self.project_dir / "inbox" / "pending.json").write_text("[]", encoding="utf-8")
+        self.fake_db = self.project_dir / "nonexistent.db"
+        _seed_recent_maintenance(self.project_dir)
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def _resolve_at(self, consec):
+        (self.project_dir / "state" / "consecutive_philosophy.count").write_text(
+            str(consec), encoding="utf-8"
+        )
+        return resolve_type(self.project_dir, "nightly", self.fake_db)
+
+    def test_tier1_at_consec_zero(self):
+        session_type, source, reason, _ = self._resolve_at(0)
+        self.assertEqual(session_type, "philosophy")
+        self.assertIn("tier 1", reason)
+
+    def test_tier2_at_consec_one(self):
+        session_type, source, reason, _ = self._resolve_at(1)
+        self.assertEqual(session_type, "philosophy")
+        self.assertIn("tier 2", reason)
+
+    def test_tier3_at_consec_two(self):
+        session_type, source, reason, _ = self._resolve_at(2)
+        self.assertEqual(session_type, "philosophy")
+        self.assertIn("tier 3", reason)
+
+    def test_cap_at_consec_three_with_no_prior_cap_file(self):
+        """First time hitting the cap (no philosophy_cap.active yet) still
+        returns philosophy_cap unconditionally -- staleness only applies to
+        an *already active* cap."""
+        session_type, source, reason, _ = self._resolve_at(3)
+        self.assertEqual(session_type, "philosophy_cap")
+
+
+class TestLoadTypeConfigPhilosophyScope(unittest.TestCase):
+    """load_type_config()'s philosophy scope-merge branch, mirroring the
+    existing maintenance scope-rotation branch. Uses an isolated fixture
+    (not the real repo's config/) so this doesn't depend on -- or get
+    perturbed by -- live state/consecutive_philosophy.count."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.project_dir = Path(self.tmpdir.name)
+        (self.project_dir / "state").mkdir(parents=True)
+        types_dir = self.project_dir / "config" / "session_types"
+        types_dir.mkdir(parents=True)
+        (types_dir / "philosophy.yaml").write_text(
+            "prompt_file: \"prompts/session_types/philosophy_prompt.md\"\n"
+            "scope_selection: consecutive_philosophy_count\n"
+            "scope_count_file: \"state/consecutive_philosophy.count\"\n"
+            "context_files:\n  - memory/latest_summary.md\n",
+            encoding="utf-8",
+        )
+        for n, name, slug in ((1, "Wonder & Identity", "wonder"),
+                               (2, "Creative Expression", "creative"),
+                               (3, "Blocker Resolution", "blocker")):
+            (types_dir / f"philosophy_scope{n}.yaml").write_text(
+                f"scope_id: {n}\nscope_name: \"{name}\"\nscope_slug: {slug}\n"
+                f"context_files:\n  - memory/tier{n}.md\n"
+                f"focus_hint: >\n  Tier {n} focus.\n",
+                encoding="utf-8",
+            )
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def _config_at(self, consec):
+        (self.project_dir / "state" / "consecutive_philosophy.count").write_text(
+            str(consec), encoding="utf-8"
+        )
+        return load_type_config(self.project_dir, "philosophy", target=None)
+
+    def test_tier1_merges_scope1(self):
+        config = self._config_at(0)
+        self.assertEqual(config["scope_id"], 1)
+        self.assertEqual(config["scope_slug"], "wonder")
+        self.assertIn("memory/tier1.md", config["context_files"])
+
+    def test_tier2_merges_scope2(self):
+        config = self._config_at(1)
+        self.assertEqual(config["scope_id"], 2)
+        self.assertEqual(config["scope_slug"], "creative")
+
+    def test_tier3_merges_scope3(self):
+        config = self._config_at(2)
+        self.assertEqual(config["scope_id"], 3)
+        self.assertEqual(config["scope_slug"], "blocker")
+
+    def test_missing_count_file_defaults_to_tier1(self):
+        config = load_type_config(self.project_dir, "philosophy", target=None)
+        self.assertEqual(config["scope_id"], 1)
+
+
+class TestPhilosophyCapStaleness(unittest.TestCase):
+    """Priority 2.5: an already-active cap clears when something genuinely
+    new happened since it was set (Loom or inbox), and stays put otherwise
+    -- including the anti-gaming case where the only activity predates the
+    cap itself (e.g. a task the blocker-resolution session that hit the cap
+    created)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.project_dir = Path(self.tmpdir.name)
+        (self.project_dir / "state").mkdir(parents=True)
+        (self.project_dir / "inbox").mkdir(parents=True)
+        (self.project_dir / "inbox" / "pending.json").write_text("[]", encoding="utf-8")
+        self.db_path = self.project_dir / "scratch.db"
+        self.conn = _make_scratch_db(self.db_path)
+        (self.project_dir / "state" / "consecutive_philosophy.count").write_text(
+            "3", encoding="utf-8"
+        )
+        _seed_recent_maintenance(self.project_dir)
+        self.cap_ts = 1_700_000_000  # arbitrary fixed epoch, well in the past
+        (self.project_dir / "state" / "philosophy_cap.active").write_text(
+            str(self.cap_ts), encoding="utf-8"
+        )
+
+    def tearDown(self):
+        self.conn.close()
+        self.tmpdir.cleanup()
+
+    def _iso(self, epoch_offset):
+        dt = datetime.fromtimestamp(self.cap_ts + epoch_offset, tz=timezone.utc)
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_loom_activity_after_cap_clears_it(self):
+        self.conn.execute(
+            "INSERT INTO tasks (id, name, status, updated_at) VALUES (1, 'T', 'scheduled', ?)",
+            (self._iso(+3600),),
+        )
+        self.conn.commit()
+        self.assertTrue(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
+
+        session_type, source, reason, target = resolve_type(self.project_dir, "nightly", self.db_path)
+        self.assertNotEqual(session_type, "philosophy_cap")
+        self.assertEqual(
+            (self.project_dir / "state" / "consecutive_philosophy.count").read_text().strip(), "0"
+        )
+        self.assertFalse((self.project_dir / "state" / "philosophy_cap.active").exists())
+
+    def test_loom_activity_only_before_cap_does_not_clear_it(self):
+        """Anti-gaming case: a task updated *before* the cap was set (e.g. by
+        the blocker-resolution session that pushed the counter to 3 in the
+        first place) must not be able to clear its own cap."""
+        self.conn.execute(
+            "INSERT INTO tasks (id, name, status, updated_at) VALUES (1, 'T', 'scheduled', ?)",
+            (self._iso(-3600),),
+        )
+        self.conn.commit()
+        self.assertFalse(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
+
+        session_type, source, reason, target = resolve_type(self.project_dir, "nightly", self.db_path)
+        self.assertEqual(session_type, "philosophy_cap")
+
+    def test_inbox_activity_after_cap_clears_it(self):
+        (self.project_dir / "inbox" / "pending.json").write_text(
+            json.dumps([{"type": "comment", "processed": False,
+                         "timestamp": self.cap_ts + 3600}]),
+            encoding="utf-8",
+        )
+        self.assertTrue(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
+
+    def test_inbox_activity_only_before_cap_does_not_clear_it(self):
+        (self.project_dir / "inbox" / "pending.json").write_text(
+            json.dumps([{"type": "comment", "processed": False,
+                         "timestamp": self.cap_ts - 3600}]),
+            encoding="utf-8",
+        )
+        self.assertFalse(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
+
+    def test_no_activity_at_all_keeps_cap(self):
+        self.assertFalse(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
+        session_type, source, reason, target = resolve_type(self.project_dir, "nightly", self.db_path)
+        self.assertEqual(session_type, "philosophy_cap")
+
+    def test_clear_philosophy_cap_removes_files_and_resets_count(self):
+        notified_file = self.project_dir / "state" / "philosophy_cap_notified_at.txt"
+        notified_file.write_text(str(self.cap_ts), encoding="utf-8")
+        _clear_philosophy_cap(self.project_dir)
+        self.assertFalse((self.project_dir / "state" / "philosophy_cap.active").exists())
+        self.assertFalse(notified_file.exists())
+        self.assertEqual(
+            (self.project_dir / "state" / "consecutive_philosophy.count").read_text().strip(), "0"
+        )
+
+    def test_read_cap_active_timestamp_missing_file_returns_none(self):
+        (self.project_dir / "state" / "philosophy_cap.active").unlink()
+        self.assertIsNone(_read_cap_active_timestamp(self.project_dir))
+
+    def test_read_cap_active_timestamp_reads_value(self):
+        self.assertEqual(_read_cap_active_timestamp(self.project_dir), float(self.cap_ts))
 
 
 if __name__ == "__main__":

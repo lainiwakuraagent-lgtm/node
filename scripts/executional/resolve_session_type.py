@@ -360,24 +360,41 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
     # See agent_project's resolve_session_type.py for detailed rationale.
     # Short version: philosophy_blocker-created tasks must not immediately
     # trigger execution and reset the consecutive counter, bypassing the cap.
+    #
+    # Staleness check: an already-active cap (state/philosophy_cap.active
+    # exists) is only honored if nothing has changed since it was set. Any
+    # Loom row or inbox entry updated *after* the cap's own timestamp counts
+    # as genuinely new information and clears it. This is what keeps the
+    # anti-gaming rule above intact: a task created by the blocker-resolution
+    # session that pushed the counter to 3 necessarily has an updated_at from
+    # *before* the cap file exists (the flag is only written on the *next*
+    # wake, once consec is already >= 3 going in) — so it can never clear its
+    # own cap. Only activity after that point can. Without this, the cap had
+    # no reset path at all outside TRIGGER_MODE=nightly's new-night check —
+    # emergency/manual mode could deadlock indefinitely once capped.
     default_goal_id = _read_default_goal_id(project_dir)
     _cap_target = {"level": "goal", "id": default_goal_id} if default_goal_id else None
     consec = _read_consecutive_philosophy_count(project_dir)
     if consec >= 3:
-        return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached", _cap_target
+        cap_ts = _read_cap_active_timestamp(project_dir)
+        if cap_ts is None or not _cap_is_stale(project_dir, db_path, cap_ts):
+            return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached", _cap_target
+        _clear_philosophy_cap(project_dir)
+        consec = 0
 
     # Priority 3: Queue state from Loom DB
     queue_type, queue_reason, target = resolve_from_queue_state(db_path)
     if queue_type:
         return queue_type, "queue_state", queue_reason, target
 
-    # Priority 3b: Inbox has unprocessed task_requests/bug_reports/task_comments → execution needed
-    # This handles the case where inbox.py startup hasn't run yet (it runs inside the
-    # session, after session type is resolved). If inbox has actionable work, force
-    # execution so inbox.py startup can convert entries to Loom tasks and work them.
+    # Priority 3b: Inbox has unprocessed request/comment entries → planning session.
+    # inbox.py (2026-08-01 redesign) no longer converts request/comment into Loom
+    # tasks automatically -- that judgment belongs to planning. Forcing execution
+    # here would launch a session whose own prompt explicitly tells it to leave
+    # the inbox alone, so the entries would sit unprocessed indefinitely.
     if _inbox_has_pending_tasks(project_dir):
-        return "execution", "inbox_pending", \
-            "inbox/pending.json has unprocessed task_request/bug_report/task_comment entries", None
+        return "planning", "inbox_pending", \
+            "inbox/pending.json has unprocessed request/comment entries", None
 
     # Priority 3c: Maintenance overdue — queue empty and no maintenance in last N days.
     # The maintenance window type (WINDOW_TYPE=maintenance) used to fire this via
@@ -390,8 +407,13 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
             f"maintenance overdue: {_days_since_maint:.1f}d >= {_maintenance_interval:.0f}d threshold", None
 
     # Priority 4: default — nothing eligible anywhere (no goal, project, or task
-    # matched any rule above) means philosophy session. Select sub-mode based on
-    # consecutive philosophy session count.
+    # matched any rule above) means a philosophy session. Which of the three
+    # escalating tiers runs is a scope-file concern (load_type_config(),
+    # mirroring maintenance's own scope_rotation) rather than a separate
+    # top-level type — consecutive_philosophy_count already carries the tier,
+    # forking the type id (the old creative/blocker_resolver split) just
+    # duplicates that information and risks drifting out of sync with it, as
+    # happened when those types' config/prompt files were consolidated away.
     #
     # If a default goal is configured for this node (DEFAULT_GOAL_ID in
     # state/agent_config.env), attach it as target so main()'s existing
@@ -403,13 +425,8 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
     # anything else. philosophy_cap aborts before consuming target_context
     # anyway, so attaching it there too is harmless.
     target = _cap_target  # reuse — already computed above
-
-    # consec already read above; consec >= 3 case already returned.
-    if consec == 2:
-        return "blocker_resolver", "default", f"consecutive_philosophy_count={consec}, blocker review mode", target
-    if consec == 1:
-        return "creative", "default", f"consecutive_philosophy_count={consec}, creative mode", target
-    return "philosophy", "default", "", target
+    tier = consec + 1  # consec is 0/1/2 here — >=3 already returned above
+    return "philosophy", "default", f"consecutive_philosophy_count={consec}, tier {tier}", target
 
 
 def _read_default_goal_id(project_dir: Path) -> Optional[int]:
@@ -444,6 +461,96 @@ def _read_consecutive_philosophy_count(project_dir: Path) -> int:
         return max(0, int(count_file.read_text(encoding="utf-8").strip()))
     except (FileNotFoundError, ValueError, OSError):
         return 0
+
+
+def _read_cap_active_timestamp(project_dir: Path) -> Optional[float]:
+    """Read the epoch timestamp state/philosophy_cap.active was written with.
+
+    None means the cap hasn't actually been activated by a prior wake yet
+    (resolve_type()'s Priority 2.5 still returns philosophy_cap in that case,
+    same as before this staleness check existed — wake.sh writes the file the
+    first time a session resolves to philosophy_cap).
+    """
+    cap_file = project_dir / "state" / "philosophy_cap.active"
+    try:
+        return float(cap_file.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, ValueError, OSError):
+        return None
+
+
+def _clear_philosophy_cap(project_dir: Path) -> None:
+    """Reset the philosophy escalation ladder when an active cap is found
+    stale. Mirrors what wake.sh's own new-night reset already does to the
+    same three files, so a stale cap doesn't wait for a full night rollover
+    to clear on its own."""
+    state_dir = project_dir / "state"
+    for name in ("philosophy_cap.active", "philosophy_cap_notified_at.txt"):
+        try:
+            (state_dir / name).unlink(missing_ok=True)
+        except OSError:
+            pass
+    try:
+        (state_dir / "consecutive_philosophy.count").write_text("0", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _cap_is_stale(project_dir: Path, db_path: Path, cap_ts: float) -> bool:
+    """True if anything in Loom or the inbox changed after the cap was set —
+    genuinely new information, not the ladder gaming its own cap (see the
+    Priority 2.5 comment in resolve_type() for why the timing argument holds).
+    """
+    if db_path.exists():
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            try:
+                for table, statuses in (
+                    ("goals", ("desire", "needs_plan", "review")),
+                    ("projects", ("desire", "needs_plan", "review")),
+                    ("tasks", ("needs_plan", "scheduled", "review")),
+                ):
+                    placeholders = ",".join("?" for _ in statuses)
+                    row = conn.execute(
+                        f"SELECT updated_at FROM {table} WHERE status IN ({placeholders}) "
+                        f"ORDER BY updated_at DESC LIMIT 1",
+                        statuses,
+                    ).fetchone()
+                    if not row or not row["updated_at"]:
+                        continue
+                    ts_str = row["updated_at"]
+                    if ts_str.endswith("Z"):
+                        ts_str = ts_str[:-1] + "+00:00"
+                    try:
+                        updated = datetime.fromisoformat(ts_str)
+                    except ValueError:
+                        continue
+                    if updated.tzinfo is None:
+                        updated = updated.replace(tzinfo=timezone.utc)
+                    if updated.timestamp() > cap_ts:
+                        return True
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            pass
+
+    inbox_path = project_dir / "inbox" / "pending.json"
+    if inbox_path.exists():
+        try:
+            data = json.loads(inbox_path.read_text(encoding="utf-8"))
+            entries = data if isinstance(data, list) else data.get("entries", [])
+            for e in entries:
+                if e.get("processed", False):
+                    continue
+                if e.get("type") not in ("request", "comment"):
+                    continue
+                ts = e.get("timestamp")
+                if isinstance(ts, (int, float)) and ts > cap_ts:
+                    return True
+        except Exception:
+            pass
+
+    return False
 
 
 def _days_since_last_maintenance(project_dir: Path) -> float:
@@ -481,12 +588,15 @@ def _days_since_last_maintenance(project_dir: Path) -> float:
 
 def _inbox_has_pending_tasks(project_dir: Path) -> bool:
     """
-    Return True if inbox/pending.json contains unprocessed entries that require
-    an execution session to handle: task_request, bug_report, or task_comment.
+    Return True if inbox/pending.json contains unprocessed judgment-tier
+    entries (request/comment -- the inbox.py 2026-08-01 redesign collapsed
+    the old task_request/bug_report/task_comment types into these two).
+    Auto-tier types (context_update, agent_message, schedule_directive,
+    verified_task) are excluded -- inbox.py handles those without anyone's
+    judgment, so their presence shouldn't force a session type.
 
-    task_comment entries carry owner feedback on existing Loom tasks. Without this
-    check, an empty Loom queue causes philosophy sessions to loop while task_comments
-    sit unread in the inbox.
+    Without this check, an empty Loom queue causes philosophy sessions to
+    loop while request/comment entries sit unread in the inbox.
     """
     inbox_path = project_dir / "inbox" / "pending.json"
     if not inbox_path.exists():
@@ -497,7 +607,7 @@ def _inbox_has_pending_tasks(project_dir: Path) -> bool:
         for e in entries:
             if e.get("processed", False):
                 continue
-            if e.get("type") in ("task_request", "bug_report", "task_comment"):
+            if e.get("type") in ("request", "comment"):
                 return True
         return False
     except Exception:
@@ -646,6 +756,33 @@ def load_type_config(project_dir: Path, session_type: str, target: Optional[dict
             scope_state_file.write_text(str(next_idx), encoding="utf-8")
         except OSError:
             pass
+
+    # Tier selection for philosophy sessions -- mirrors maintenance's scope
+    # rotation in shape, but selects by consecutive_philosophy_count (an
+    # escalating count that resets whenever the queue produces real work
+    # again -- including via the staleness check above) rather than a blind
+    # rotation. Filename is derived the same deterministic way maintenance's
+    # branch above does (f"..._scope{N}.yaml"), not read from philosophy.yaml's
+    # own scope_files mapping -- that field is documentation of intent, not
+    # parsed here, since the hand-rolled YAML fallback in load_yaml_simple()
+    # can't represent a nested int-keyed mapping and this avoids depending on
+    # PyYAML being installed.
+    if session_type == "philosophy" and config.get("scope_selection") == "consecutive_philosophy_count":
+        count_file = project_dir / config["scope_count_file"]
+        try:
+            consec = int(count_file.read_text(encoding="utf-8").strip())
+        except (FileNotFoundError, ValueError, OSError):
+            consec = 0
+        scope_num = min(max(consec, 0) + 1, 3)  # tier 1-3, defensively clamped
+
+        scope_file = project_dir / "config" / "session_types" / f"philosophy_scope{scope_num}.yaml"
+        scope_config = load_yaml_simple(scope_file)
+
+        config["context_files"] = scope_config.get("context_files", config.get("context_files", []))
+        config["focus_hint"] = scope_config.get("focus_hint", config.get("focus_hint", ""))
+        config["scope_id"] = scope_num
+        config["scope_name"] = scope_config.get("scope_name", f"Tier {scope_num}")
+        config["scope_slug"] = scope_config.get("scope_slug") or f"tier{scope_num}"
 
     # Planning has goal-scoped ("decompose into projects") and project-scoped
     # (≈ the original planning content) variants, selected by which level
