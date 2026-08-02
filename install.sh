@@ -30,6 +30,7 @@
 #   --skip-nexus               Skip Nexus registration
 #   --skip-loom                Skip Loom clone/venv (use existing install if present)
 #   --skip-khal                Skip khal calendar setup
+#   --skip-honcho              Skip Honcho memory client configuration
 #   --non-interactive          Never prompt; read from env vars; fail on missing required values
 #   --dry-run                  Print what would happen; make no changes
 #   --remote                   Install on a remote host over SSH
@@ -58,6 +59,7 @@ SKIP_TELEGRAM=0
 SKIP_NEXUS=0
 SKIP_LOOM=0
 SKIP_KHAL=0
+SKIP_HONCHO=0
 NON_INTERACTIVE=0
 DRY_RUN=0
 
@@ -108,6 +110,7 @@ Flags:
   --skip-nexus               Skip Nexus registration
   --skip-loom                Skip Loom clone/venv (use existing)
   --skip-khal                Skip khal calendar setup
+  --skip-honcho              Skip Honcho memory client configuration
   --non-interactive          Never prompt; read from env; fail on missing
   --dry-run                  Print what would happen; make no changes
   --remote                   Install on a remote host over SSH
@@ -191,6 +194,7 @@ while [[ $# -gt 0 ]]; do
     --skip-nexus)        SKIP_NEXUS=1;             shift ;;
     --skip-loom)         SKIP_LOOM=1;              shift ;;
     --skip-khal)         SKIP_KHAL=1;              shift ;;
+    --skip-honcho)       SKIP_HONCHO=1;            shift ;;
     --non-interactive)   NON_INTERACTIVE=1;        shift ;;
     --dry-run)           DRY_RUN=1;               shift ;;
     --remote)            REMOTE=1;                 shift ;;
@@ -709,6 +713,53 @@ else
       ;;
   esac
   rm -f "$_nexus_resp"
+fi
+
+# ── Step 6b: Honcho configuration ────────────────────────────────────────────
+
+step "6b: Honcho memory client (optional)"
+
+if [ "$SKIP_HONCHO" = "1" ]; then
+  info "SKIP — --skip-honcho flag set"
+else
+  _honcho_url=""
+  _honcho_workspace=""
+
+  if [ "$NON_INTERACTIVE" = "1" ]; then
+    _honcho_url="${HONCHO_URL:-}"
+    _honcho_workspace="${HONCHO_WORKSPACE:-}"
+  elif [ "$DRY_RUN" = "1" ]; then
+    dry "Prompt for HONCHO_URL and HONCHO_WORKSPACE; write to state/agent_config.env"
+  else
+    printf "  Honcho server URL (leave blank to skip): "
+    read -r _honcho_url
+    if [ -n "$_honcho_url" ]; then
+      printf "  Honcho workspace ID [%s]: " "${AGENT_NAME}-workspace"
+      read -r _honcho_workspace
+      [ -z "$_honcho_workspace" ] && _honcho_workspace="${AGENT_NAME}-workspace"
+    fi
+  fi
+
+  if [ -n "$_honcho_url" ] && [ "$DRY_RUN" = "0" ]; then
+    _env_file="${INSTALL_ROOT}/state/agent_config.env"
+    if [ "$REMOTE" = "1" ]; then
+      # Append to remote agent_config.env if not already set
+      ssh_run "grep -q '^HONCHO_URL=' '${_env_file}' 2>/dev/null || echo 'HONCHO_URL=${_honcho_url}' >> '${_env_file}'"
+      ssh_run "grep -q '^HONCHO_WORKSPACE=' '${_env_file}' 2>/dev/null || echo 'HONCHO_WORKSPACE=${_honcho_workspace}' >> '${_env_file}'"
+    else
+      grep -q "^HONCHO_URL=" "${_env_file}" 2>/dev/null \
+        || printf 'HONCHO_URL=%s\n' "$_honcho_url" >> "${_env_file}"
+      grep -q "^HONCHO_WORKSPACE=" "${_env_file}" 2>/dev/null \
+        || printf 'HONCHO_WORKSPACE=%s\n' "$_honcho_workspace" >> "${_env_file}"
+    fi
+    ok "Honcho configured: ${_honcho_url} (workspace: ${_honcho_workspace})"
+    info "Test connectivity after install:"
+    info "  /usr/bin/python3 ${INSTALL_ROOT}/tools/executional/honcho_client.py --test-read <peer>"
+  elif [ -z "$_honcho_url" ] && [ "$DRY_RUN" = "0" ]; then
+    info "Skipped — no Honcho URL provided. Configure later:"
+    info "  echo 'HONCHO_URL=http://...' >> state/agent_config.env"
+    info "  echo 'HONCHO_WORKSPACE=my-workspace' >> state/agent_config.env"
+  fi
 fi
 
 # ── Step 7: Systemd units ─────────────────────────────────────────────────────
