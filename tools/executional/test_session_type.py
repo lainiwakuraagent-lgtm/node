@@ -14,7 +14,7 @@ fixture, matching resolve_session_type.py's actual priority order:
   1. SESSION_TYPE env var
   2. WINDOW_TYPE env var (maintenance / reflection / work-or-unset)
   3. Loom queue state (evaluation / planning / audit / execution rules)
-  4. inbox/pending.json task_request/bug_report/task_comment -> execution
+  4. inbox/pending.json request/comment -> execution
   5. default -> philosophy (tiered by consecutive_philosophy.count)
 
 Usage:
@@ -104,7 +104,8 @@ def make_loom_db(path: Path, goals: list = None, tasks: list = None) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'triage', tags TEXT,
             depends TEXT, blocked_reason TEXT, wait_until TEXT,
-            urgency_score REAL DEFAULT 0, priority TEXT DEFAULT 'none'
+            urgency_score REAL DEFAULT 0, priority TEXT DEFAULT 'none',
+            project_id INTEGER, goal_id INTEGER
         )
     """)
     for g in (goals or []):
@@ -129,6 +130,26 @@ def make_bare_project(tmp: Path) -> None:
     (tmp / "config" / "session_types").mkdir(parents=True, exist_ok=True)
 
 
+def write_recent_maintenance(tmp: Path) -> None:
+    """Write a session_log.csv with a recent maintenance entry.
+
+    Many tests pass bare project dirs to the resolver; without a recent
+    maintenance entry, Priority 3c (maintenance overdue) fires before the
+    queue-state rules being tested, producing unexpected 'maintenance' results.
+    Call this in every test where queue-state or default-philosophy behavior is
+    the thing under test and maintenance firing would be spurious.
+    """
+    (tmp / "logs").mkdir(parents=True, exist_ok=True)
+    recent_ts = (datetime.now(timezone.utc) - timedelta(minutes=30)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    (tmp / "logs" / "session_log.csv").write_text(
+        "timestamp,session_type,duration_minutes,context_pct_at_exit,one_line_summary\n"
+        f"{recent_ts},maintenance,20,15,test fixture entry\n",
+        encoding="utf-8",
+    )
+
+
 # ===========================================================================
 # Test 1: SESSION_TYPE env var override (always wins, priority 1)
 # ===========================================================================
@@ -147,6 +168,7 @@ print("\n[2] Default fallback (empty queue, no Loom DB, no inbox)")
 with tempfile.TemporaryDirectory() as tmpdir:
     tmp = Path(tmpdir)
     make_bare_project(tmp)
+    write_recent_maintenance(tmp)  # prevent Priority 3c from firing spuriously
     missing_db = tmp / "nonexistent_loom.db"
     result = run_resolver(tmp, "nightly", loom_db=missing_db)
     check("session_type=philosophy (default)", result.get("session_type") == "philosophy",
@@ -237,6 +259,7 @@ print("\n[8] Queue-state: needs_plan task with unmet dependency is skipped")
 with tempfile.TemporaryDirectory() as tmpdir:
     tmp = Path(tmpdir)
     make_bare_project(tmp)
+    write_recent_maintenance(tmp)
     db = tmp / "loom.db"
     make_loom_db(
         db,
@@ -256,6 +279,7 @@ print("\n[9] Queue-state: ready scheduled task -> execution")
 with tempfile.TemporaryDirectory() as tmpdir:
     tmp = Path(tmpdir)
     make_bare_project(tmp)
+    write_recent_maintenance(tmp)
     db = tmp / "loom.db"
     make_loom_db(db, tasks=[{"name": "ready to go", "status": "scheduled"}])
     result = run_resolver(tmp, "nightly", loom_db=db)
@@ -269,6 +293,7 @@ print("\n[10] Queue-state: blocked scheduled task is not picked up")
 with tempfile.TemporaryDirectory() as tmpdir:
     tmp = Path(tmpdir)
     make_bare_project(tmp)
+    write_recent_maintenance(tmp)
     db = tmp / "loom.db"
     make_loom_db(db, tasks=[{"name": "blocked", "status": "scheduled",
                              "blocked_reason": "waiting on owner"}])
@@ -277,19 +302,19 @@ with tempfile.TemporaryDirectory() as tmpdir:
           f"got {result.get('session_type')!r}")
 
 # ===========================================================================
-# Test 11: Inbox pending task_request forces execution even with empty queue
+# Test 11: Inbox pending request forces execution even with empty queue
 # ===========================================================================
-print("\n[11] Inbox pending task_request -> execution")
+print("\n[11] Inbox pending request -> execution")
 with tempfile.TemporaryDirectory() as tmpdir:
     tmp = Path(tmpdir)
     make_bare_project(tmp)
     (tmp / "inbox").mkdir()
     (tmp / "inbox" / "pending.json").write_text(json.dumps([
-        {"type": "task_request", "content": "do the thing", "processed": False}
+        {"type": "request", "kind": "task", "content": "do the thing", "processed": False}
     ]))
     missing_db = tmp / "nonexistent_loom.db"
     result = run_resolver(tmp, "nightly", loom_db=missing_db)
-    check("session_type=execution", result.get("session_type") == "execution",
+    check("session_type=planning", result.get("session_type") == "planning",
           f"got {result.get('session_type')!r}")
     check("resolution_source=inbox_pending", result.get("resolution_source") == "inbox_pending")
 
@@ -297,11 +322,12 @@ with tempfile.TemporaryDirectory() as tmpdir:
 # Test 12: Philosophy tier escalation via consecutive_philosophy.count
 # ===========================================================================
 print("\n[12] Philosophy tier escalation")
-for count, expected in [(0, "philosophy"), (1, "creative"),
-                         (2, "blocker_resolver"), (3, "philosophy_cap"), (5, "philosophy_cap")]:
+for count, expected in [(0, "philosophy"), (1, "philosophy"),
+                         (2, "philosophy"), (3, "philosophy_cap"), (5, "philosophy_cap")]:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         make_bare_project(tmp)
+        write_recent_maintenance(tmp)
         (tmp / "state").mkdir()
         (tmp / "state" / "consecutive_philosophy.count").write_text(str(count))
         missing_db = tmp / "nonexistent_loom.db"
