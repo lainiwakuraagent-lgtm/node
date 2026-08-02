@@ -45,7 +45,7 @@ PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
   --db ~/.local/share/loom/loom.db goal edit <GOAL_ID> -s done
 ```
 For a goal audit that holds up, also write a closing note -- what the goal
-actually accomplished -- to `memory/latest_summary.md` or `memory/progress.md`.
+actually accomplished -- to `memory/latest_summary.md`.
 
 **Doesn't hold up** -- do not close it. Create specific follow-up tasks (or,
 for a goal, a follow-up project) describing exactly what's missing or broken
@@ -70,4 +70,3 @@ PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
   you actually checked (name the files/commands used to verify).
 - Follow-up tasks (or a follow-up project, for a goal audit) for anything
   that doesn't hold up.
-- One line in `memory/latest_summary.md` noting what was audited and the result.

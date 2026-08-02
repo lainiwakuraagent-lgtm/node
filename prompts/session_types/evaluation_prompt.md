@@ -48,9 +48,10 @@ PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
   --db ~/.local/share/loom/loom.db project edit <PROJECT_ID> --status needs_plan
 ```
 Also sketch what comes next so the planning session doesn't start from a blank
-page: for a goal, 2-4 candidate project names; for a project, 2-4 task
-skeletons (name + one-line description) in `memory/work/goal_<ID>/`, or add
-them directly as Loom tasks with status `triage`.
+page: for a goal, 2-4 candidate project names in `memory/work/goal_<ID>/`; for
+a project, 2-4 task skeletons (name + one-line description) in
+`memory/work/project_<ID>/` — the project's own folder, not its parent
+goal's.
 
 **Leave as `desire`** -- not ready yet, but still worth keeping. State
 explicitly what's missing (a decision, a dependency, more information) so
@@ -75,4 +76,3 @@ reasoning without re-deriving it.
 - A status transition for the goal or project reviewed (or an explicit,
   reasoned decision to leave it as `desire`).
 - Project or task skeletons if promoting to `needs_plan`.
-- One line in `memory/latest_summary.md` noting what was evaluated and the outcome.
