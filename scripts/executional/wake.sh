@@ -20,7 +20,7 @@ PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$PROJECT_DIR"
 STATE_DIR="$PROJECT_DIR/state"
 LOG_DIR="$PROJECT_DIR/logs"
-WRAPPER_TEMPLATE="$PROJECT_DIR/prompts/wrapper_prompt.md"
+CORE_PROMPT_DIR="$PROJECT_DIR/prompts/core"
 EMERGENCY_FLAG="$STATE_DIR/emergency_mode.active"
 
 # --- Load agent config (parameterize for new node instances) ---
@@ -72,6 +72,40 @@ os.replace(tmp, out_path)
 ' "$TRIGGER_REQUEST_ID" "$decision" "$reason" "$stype" "$rpid" \
     "$STATE_DIR/manual_trigger_result.json" 2>/dev/null || true
 }
+
+# --- Gate 0: single-instance lock (all modes) — acquired FIRST, before any ---
+# state mutation below (night-reset, philosophy cap, Loom writes). Previously
+# this lock was only checked-then-written right before the `claude` launch,
+# near the end of the script — with the night-reset block, Gate 1-3 checks,
+# khal sync, Loom context resolution, and session-type resolution all running
+# in between the check and the write. Any wake.sh invocation starting inside
+# that window passed the check too (nothing had written the file yet), so
+# duplicate triggers firing close together — as the stray T438 test timers
+# did — could each build their own prompt and launch their own `claude`
+# session concurrently, racing on the same state files. flock is atomic (no
+# check-then-write gap) and self-releasing: if the holding process dies for
+# any reason, including a crash the EXIT trap below never gets to run, the
+# kernel drops the flock the moment its last fd closes. That makes the old
+# manual "is the PID in the lock file still alive" staleness dance below
+# unnecessary — flock already can't go stale.
+#
+# The lock file's path and plain-PID-text content are unchanged from before:
+# scripts/executional/check_window.py (--lock-file, existence-only) and
+# tools/executional/web_server.py (status display, reads the PID) both read
+# this same file directly, so its shape has to stay a plain file, not a lock
+# directory.
+LOCK_FILE="$STATE_DIR/session.lock"
+exec 9<>"$LOCK_FILE"
+if ! flock -n 9; then
+  log_line "SKIP: another wake.sh instance holds the lock. Skipping this wake."
+  write_trigger_result "skipped" "session already running (lock held)"
+  exit 0
+fi
+echo $$ > "$LOCK_FILE"
+# No EXIT trap — flock on FD 9 is inherited by the claude child and released
+# automatically by the kernel when the last holder (claude) exits. Removing
+# the file on wake.sh EXIT would break this: a new instance could open a fresh
+# inode and bypass the lock while claude still runs.
 
 # --- Log rotation (non-fatal) ---
 # If wake.log exceeds 1MB, rotate it before writing this session's entries.
@@ -128,60 +162,26 @@ if [ "$last_recorded_night" != "$night_id" ]; then
 fi
 current_count=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
 
-# --- Early abort: philosophy cap active ---
-# Written by the philosophy_cap session type gate (below). Prevents full type-resolution
-# overhead on every 30s-poll wake when the cap is simply holding.
-# Cleared on new night (above) or when real inbox work appears.
-if [ -f "$STATE_DIR/philosophy_cap.active" ] && [ "$TRIGGER_MODE" = "nightly" ]; then
-  # Check if inbox has pending work — if so, clear the cap and proceed
-  _inbox_pending=0
-  if [ -f "$PROJECT_DIR/inbox/pending.json" ]; then
-    _inbox_pending=$(/usr/bin/python3 -c "
-import json, sys
-try:
-  data = json.load(open('$PROJECT_DIR/inbox/pending.json'))
-  active = [e for e in data if not e.get('processed', False)
-            and e.get('type') in ('task_request','bug_report','task_comment')]
-  print(len(active))
-except:
-  print(0)
-" 2>/dev/null || echo "0")
-  fi
+# --- Philosophy cap staleness/notification: moved to resolve_session_type.py + the
+# philosophy_cap abort handler below. This used to be a separate nightly-only early
+# exit here that only ever checked the inbox for "is the cap still valid" — it ran
+# before the window check determined WINDOW_TYPE (so it could swallow a legitimate scheduled
+# maintenance/reflection window that should override the cap), never checked the Loom
+# queue itself (only inbox), and being nightly-gated meant emergency/manual mode had
+# no reset path at all short of a full calendar-night rollover once capped. All of
+# that logic now lives in resolve_session_type.py's Priority 2.5 (_cap_is_stale),
+# which is mode-agnostic and Loom-aware, and runs every wake regardless of
+# TRIGGER_MODE — the modest per-wake cost of always invoking it (a few sqlite
+# queries) is a better trade than a second, drifting reimplementation in bash.
 
-  if [ "$_inbox_pending" -gt 0 ]; then
-    log_line "Philosophy cap active but inbox_pending=$_inbox_pending — clearing cap."
-    rm -f "$STATE_DIR/philosophy_cap.active" "$STATE_DIR/philosophy_cap_notified_at.txt"
-  else
-    # T443: proactive notification when cap has been held > threshold with empty inbox
-    _cap_ts=$(cat "$STATE_DIR/philosophy_cap.active" 2>/dev/null | tr -d '[:space:]' || echo "0")
-    _now=$(date +%s)
-    _age=$(( _now - _cap_ts ))
-    _notify_threshold=${PHILOSOPHY_CAP_NOTIFY_THRESHOLD:-7200}
-    _notify_rate=${PHILOSOPHY_CAP_NOTIFY_RATE:-10800}
-    _last_notify=$(cat "$STATE_DIR/philosophy_cap_notified_at.txt" 2>/dev/null | tr -d '[:space:]' || echo "0")
-    _since_notify=$(( _now - _last_notify ))
-    if [ "$_age" -gt "$_notify_threshold" ] && [ "$_since_notify" -gt "$_notify_rate" ]; then
-      _age_h=$(( _age / 3600 ))
-      _cap_time=$(date -d "@${_cap_ts}" '+%H:%M %Z %Y-%m-%d' 2>/dev/null || echo "ts=${_cap_ts}")
-      printf '@Lain philosophy cap: held %dh (since %s). Inbox empty — no sessions will run until a task arrives or the next nightly boundary resets. To unblock manually: rm state/philosophy_cap.active' \
-        "$_age_h" "$_cap_time" \
-        | bash "$PROJECT_DIR/tools/conversational/telegram_send.sh" 2>/dev/null || true
-      echo "$_now" > "$STATE_DIR/philosophy_cap_notified_at.txt"
-      log_line "T443: philosophy_cap_alert sent (${_age}s held, inbox=0)"
-    fi
-    log_line "ABORT: philosophy cap active (state/philosophy_cap.active). Skipping."
-    exit 0
-  fi
-fi
-
-# --- Gate 0: subscription usage limits (nightly + emergency) ---
+# --- Gate 1: subscription usage limits (nightly + emergency) ---
 # manual is a deliberate break-glass override: it exists for exactly the case
 # where a session is needed despite hitting a usage limit, so it skips this
 # gate entirely rather than being fail-open on error like the other modes.
 # This is what distinguishes it from emergency mode, which bypasses the time
 # window but still respects usage limits.
 if [ "$TRIGGER_MODE" = "manual" ]; then
-  log_line "Gate 0 (usage check) bypassed -- TRIGGER_MODE=manual (break-glass override)."
+  log_line "Gate 1 (usage check) bypassed -- TRIGGER_MODE=manual (break-glass override)."
 else
   # Fail-open on errors so network/auth issues never silently kill the launch.
   usage_check_output=$(bash "$PROJECT_DIR/tools/executional/check_session.sh" --usage 2>&1) \
@@ -197,7 +197,7 @@ else
   fi
 fi
 
-# --- Gate 1 (nightly only): block if emergency mode is active ---
+# --- Gate 2 (nightly only): block if emergency mode is active ---
 # Emergency mode owns the schedule when active; nightly sessions step aside.
 if [ "$TRIGGER_MODE" = "nightly" ]; then
   if [ -f "$EMERGENCY_FLAG" ]; then
@@ -207,19 +207,35 @@ if [ "$TRIGGER_MODE" = "nightly" ]; then
   fi
 fi
 
-# --- Gate 2 (nightly only): window + trigger check from session_schedule.json ---
+# --- Gate 3 (nightly only): window + trigger check from session_schedule.json ---
 # Emergency and manual modes bypass window checks entirely.
 # Logic lives in scripts/check_window.py. `check` is read-only — a matching
 # one_off entry is detected but NOT marked fired here. It's only marked fired
-# after Gate 4 (lock check) passes, below, so a one_off session can never be
-# silently consumed without actually launching.
+# once we're past the lock (Gate 0, acquired at the top of this script),
+# below, so a one_off session can never be silently consumed without actually
+# launching.
 ONE_OFF_INDEX=""
 if [ "$TRIGGER_MODE" = "nightly" ]; then
   SCHEDULE_FILE="$PROJECT_DIR/config/session_schedule.json"
-  LOCK_FILE_PRE="$STATE_DIR/session.lock"
 
+  # Best-effort: pull this agent's khal calendar into one_off[] before the
+  # window check reads it, so user-added custom windows are considered.
+  # windows[] (nightly-work/maintenance/reflection) is never touched by this --
+  # a khal failure here must never block the fixed nightly schedule.
+  khal_sync_result=$(python3 "$PROJECT_DIR/tools/executional/khal_schedule_reader.py" sync \
+    --schedule-file "$SCHEDULE_FILE" 2>&1) || true
+  log_line "khal schedule sync: $khal_sync_result"
+
+  # --lock-file /dev/null: check_window.py's own "someone else already
+  # running" signal (used for its consecutive_run catch-up-poll logic) would
+  # otherwise read $STATE_DIR/session.lock -- but by this point Gate 0 has
+  # already atomically acquired that same lock for us, so it always exists
+  # from here on and would misreport "someone else is running" against
+  # ourselves. Double-launch is already structurally impossible (Gate 0
+  # would have exited before reaching here), so this check is redundant --
+  # /dev/null (never exists) restores the original catch-up-poll behavior.
   window_result=$(python3 "$PROJECT_DIR/scripts/executional/check_window.py" check \
-    --schedule-file "$SCHEDULE_FILE" --lock-file "$LOCK_FILE_PRE" 2>&1)
+    --schedule-file "$SCHEDULE_FILE" --lock-file /dev/null 2>&1)
 
   log_line "Window check result: $window_result"
 
@@ -234,31 +250,17 @@ if [ "$TRIGGER_MODE" = "nightly" ]; then
     exit 0
   fi
 else
-  log_line "Gate 2 (window check) skipped — TRIGGER_MODE=$TRIGGER_MODE."
+  log_line "Gate 3 (window check) skipped — TRIGGER_MODE=$TRIGGER_MODE."
 fi
 
-# --- Gate 3 retired: session-count hard cap was downgraded to informational-only
-# (see `current_count` above — tracked but no longer enforced). Numbering below
-# kept as "Gate 4" for continuity with existing logs/diagrams rather than
-# renumbering everything for a cosmetic gap. ---
+# session-count hard cap (was Gate 3 in an older revision) was downgraded to
+# informational-only — see `current_count` above, tracked but not enforced.
+# The single-instance lock is Gate 0, acquired at the very top of this script.
 
-# --- Gate 4: no session already running (all modes) ---
-LOCK_FILE="$STATE_DIR/session.lock"
-if [ -f "$LOCK_FILE" ]; then
-  locked_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
-  if [ -n "$locked_pid" ] && kill -0 "$locked_pid" 2>/dev/null; then
-    log_line "SKIP: session already running (PID $locked_pid). Skipping this wake."
-    write_trigger_result "skipped" "session already running (PID $locked_pid)"
-    exit 0
-  else
-    log_line "WARNING: stale lock found (PID ${locked_pid:-unknown} is dead). Removing and proceeding."
-    rm -f "$LOCK_FILE"
-  fi
-fi
-
-# Gate 4 has passed — safe now to consume the one_off entry detected in Gate 2.
-# For nightly mode, ONE_OFF_INDEX was already set by the Gate 2 check above.
-# For manual/emergency mode, Gate 2 is skipped so we do a one-off-only check here.
+# We're already holding the lock (Gate 0, top of script) — safe to consume
+# the one_off entry detected in Gate 3. For nightly mode, ONE_OFF_INDEX was
+# already set by the Gate 3 check above. For manual/emergency mode, Gate 3 is
+# skipped so we do a one-off-only check here.
 if [ "$TRIGGER_MODE" != "nightly" ] && [ -z "$ONE_OFF_INDEX" ]; then
   _schedule_file="$PROJECT_DIR/config/session_schedule.json"
   if [ -f "$_schedule_file" ]; then
@@ -407,14 +409,18 @@ if [ -f "$PROJECT_DIR/scripts/executional/resolve_session_type.py" ]; then
     "$SESSION_TYPE_RESULT" 2>/dev/null || echo "")
   export MAINTENANCE_SCOPE
 
-  # Qualify maintenance's logged/reported type by scope (e.g. maintenance_memory)
-  # so session logs, session history, and analytics distinguish which of the 3
-  # rotating scopes ran -- previously every maintenance session was logged
-  # identically as "maintenance" regardless of scope. Config-file lookup above
-  # already used the base "maintenance" identity; this only affects what gets
-  # reported downstream from here.
-  if [ "$CURRENT_SESSION_TYPE" = "maintenance" ] && [ -n "$MAINTENANCE_SCOPE_SLUG" ]; then
-    CURRENT_SESSION_TYPE="maintenance_${MAINTENANCE_SCOPE_SLUG}"
+  # Qualify the logged/reported type by scope (e.g. maintenance_memory,
+  # philosophy_wonder) so session logs, session history, and analytics
+  # distinguish which of the 3 rotating scopes/tiers ran -- previously every
+  # session of these types was logged identically regardless of scope.
+  # Config-file lookup above already used the base type identity; this only
+  # affects what gets reported downstream from here. Variable names stay
+  # MAINTENANCE_SCOPE* (not renamed to something generic) since
+  # analytics_write.py already documents that name in a comment -- this is
+  # just the condition widening to cover philosophy too, not a rename.
+  if { [ "$CURRENT_SESSION_TYPE" = "maintenance" ] || [ "$CURRENT_SESSION_TYPE" = "philosophy" ]; } \
+      && [ -n "$MAINTENANCE_SCOPE_SLUG" ]; then
+    CURRENT_SESSION_TYPE="${CURRENT_SESSION_TYPE}_${MAINTENANCE_SCOPE_SLUG}"
   fi
 
   export CURRENT_SESSION_TYPE CURRENT_SESSION_TYPE_SOURCE
@@ -435,15 +441,24 @@ try:
     c = data.get('assembled_context', '').strip()
     t = data.get('target_context', '').strip()
     # Substitute maintenance scope placeholders if present
-    if p and data.get('scope_id'):
-        scope_name = data.get('scope_name', f'Scope {data[\"scope_id\"]}')
-        focus_hint = data.get('focus_hint', '')
+    scope_id = data.get('scope_id')
+    scope_name = data.get('scope_name', f'Scope {scope_id}') if scope_id else ''
+    focus_hint = data.get('focus_hint', '')
+    if p and scope_id:
         p = p.replace('{MAINTENANCE_SCOPE_NAME}', scope_name)
         p = p.replace('{MAINTENANCE_SCOPE_FOCUS}', focus_hint)
     if p:
         parts.append(p)
     if c:
         parts.append('## CONTEXT PRELOAD\n\n' + c)
+    # Generic scope section -- not every scoped type's prompt file uses the
+    # {MAINTENANCE_SCOPE_*} inline placeholders above (philosophy_prompt.md
+    # deliberately doesn't -- its tiers are static sections, told apart by
+    # this block instead). Skipped for maintenance to avoid saying the same
+    # thing twice in one prompt, since that type's own placeholders already
+    # carry it inline.
+    if scope_id and data.get('session_type') != 'maintenance':
+        parts.append(f'## SCOPE\n\n{scope_name} (tier/scope {scope_id})\n\n{focus_hint}')
     if t:
         # The specific goal/project record this session's dispatch rule matched
         # (evaluation/planning/audit at goal or project level) — system-wide,
@@ -461,14 +476,43 @@ except Exception:
   rm -f "$SESSION_TYPE_RESULT"
 
   # Gate: abort if consecutive philosophy cap reached (no Claude launch needed).
+  # Runs regardless of TRIGGER_MODE now — resolve_session_type.py's Priority 2.5
+  # already decides staleness (Loom + inbox aware) before ever returning this type,
+  # so by the time we see it here the cap is genuinely still valid for every mode.
   if [ "$CURRENT_SESSION_TYPE" = "philosophy_cap" ]; then
     _consec=$(cat "$STATE_DIR/consecutive_philosophy.count" 2>/dev/null || echo "3")
     log_line "ABORT: philosophy cap reached (consecutive_philosophy.count=$_consec). Skipping session."
-    # Write cap-active flag for early-abort on subsequent 30s-poll wakes.
-    # Cleared by new-night detection or inbox pending work.
+    # Write cap-active flag on first hit; stays put on subsequent hits until
+    # resolve_session_type.py finds it stale and clears it.
+    _cap_is_new=0
     if [ ! -f "$STATE_DIR/philosophy_cap.active" ]; then
       echo "$(date +%s)" > "$STATE_DIR/philosophy_cap.active"
+      _cap_is_new=1
     fi
+
+    # T443: proactive notification when cap has been held > threshold. Moved here
+    # (was previously only reachable in a nightly-only early-abort path) so
+    # emergency/manual mode gets notified too instead of silently looping forever.
+    if [ "$_cap_is_new" -eq 0 ]; then
+      _cap_ts=$(cat "$STATE_DIR/philosophy_cap.active" 2>/dev/null | tr -d '[:space:]' || echo "0")
+      _now=$(date +%s)
+      _age=$(( _now - _cap_ts ))
+      _notify_threshold=${PHILOSOPHY_CAP_NOTIFY_THRESHOLD:-7200}
+      _notify_rate=${PHILOSOPHY_CAP_NOTIFY_RATE:-10800}
+      _last_notify=$(cat "$STATE_DIR/philosophy_cap_notified_at.txt" 2>/dev/null | tr -d '[:space:]' || echo "0")
+      _since_notify=$(( _now - _last_notify ))
+      if [ "$_age" -gt "$_notify_threshold" ] && [ "$_since_notify" -gt "$_notify_rate" ]; then
+        _age_h=$(( _age / 3600 ))
+        _cap_time=$(date -d "@${_cap_ts}" '+%H:%M %Z %Y-%m-%d' 2>/dev/null || echo "ts=${_cap_ts}")
+        printf '@Lain philosophy cap: held %dh (since %s, mode=%s). No sessions will run until new work appears or the next nightly boundary resets. To unblock manually: rm state/philosophy_cap.active' \
+          "$_age_h" "$_cap_time" "$TRIGGER_MODE" \
+          | bash "$PROJECT_DIR/tools/conversational/telegram_send.sh" 2>/dev/null || true
+        echo "$_now" > "$STATE_DIR/philosophy_cap_notified_at.txt"
+        log_line "T443: philosophy_cap_alert sent (${_age}s held, mode=$TRIGGER_MODE)"
+      fi
+    fi
+    unset _cap_is_new
+
     write_trigger_result "aborted" "philosophy cap reached (consecutive_philosophy_count=$_consec)"
     rm -f "$AUGMENTED_GOAL" "$DYNAMIC_GOAL_FILE"
     exit 0
@@ -501,7 +545,7 @@ fi
 unset _ACTIVE_PROJECT_PATH_FILE
 
 python3 "$PROJECT_DIR/scripts/executional/splice_prompt.py" \
-  "$WRAPPER_TEMPLATE" "$GOAL_FILE" "$session_prompt" "$persona_arg"
+  "$CORE_PROMPT_DIR" "$GOAL_FILE" "$session_prompt" "$persona_arg"
 
 # Record count BEFORE launching — counts even if agent crashes or hangs.
 echo "$new_count" > "$COUNT_FILE"
@@ -533,10 +577,6 @@ echo "$TRIGGER_MODE" > "$STATE_DIR/trigger_mode.txt"
 
 session_start_epoch=$(date +%s)
 echo "$session_start_epoch" > "$STATE_DIR/session_start_epoch"
-
-# Write lock file. EXIT trap ensures cleanup even on crash.
-echo $$ > "$LOCK_FILE"
-trap 'rm -f "$LOCK_FILE"' EXIT
 
 # --- Nexus heartbeat: push last_seen at session start (non-fatal, T402) ---
 _nexus_token_file="$STATE_DIR/nexus_${AGENT_NAME}_token.txt"
@@ -612,11 +652,14 @@ rm -f "$session_prompt"
 rm -f "$DYNAMIC_GOAL_FILE"
 
 # --- Update consecutive philosophy counter ---
-# The three escalation-ladder types increment; any other type resets to 0.
-# philosophy_cap never reaches here -- it exits before Claude ever launches.
+# Any philosophy-tier session increments (bare "philosophy" or scope-qualified
+# "philosophy_wonder"/"philosophy_creative"/"philosophy_blocker" -- the glob
+# below also matches "philosophy_cap", but that's harmless: philosophy_cap
+# always exits before Claude ever launches, well before this block runs.
+# Any other type resets to 0.
 _CONSEC_FILE="$STATE_DIR/consecutive_philosophy.count"
 case "${CURRENT_SESSION_TYPE:-}" in
-  philosophy|creative|blocker_resolver)
+  philosophy|philosophy_*)
     _prev=$(cat "$_CONSEC_FILE" 2>/dev/null || echo "0")
     _next=$(( _prev + 1 ))
     echo "$_next" > "$_CONSEC_FILE"

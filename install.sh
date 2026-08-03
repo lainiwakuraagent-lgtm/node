@@ -39,6 +39,9 @@
 #   --install-path <path>      Remote install path (default: /home/<user>/lain/<agent-name>)
 #   --github-pat <pat>         GitHub PAT for private repo clone (auto-read from identity/credentials.md)
 #   --ssh-key <path>           SSH key for remote auth (default: ~/.ssh/id_ed25519)
+#   --i-know-this-is-the-template  Bypass the guard against installing locally
+#                               into the blank_node template checkout itself.
+#                               For testing, prefer scripts/dev/test_install.sh.
 
 set -euo pipefail
 
@@ -62,6 +65,7 @@ SKIP_KHAL=0
 SKIP_HONCHO=0
 NON_INTERACTIVE=0
 DRY_RUN=0
+I_KNOW_THIS_IS_THE_TEMPLATE=0
 
 REMOTE=0
 TARGET_HOST=""
@@ -119,6 +123,9 @@ Flags:
   --install-path <path>      Remote install path (default: /home/<user>/lain/<name>)
   --github-pat <pat>         GitHub PAT for private clone (auto-read from identity/credentials.md)
   --ssh-key <path>           SSH key             (default: ~/.ssh/id_ed25519)
+  --i-know-this-is-the-template  Bypass the guard against installing locally
+                              into the blank_node template checkout itself.
+                              For testing, prefer scripts/dev/test_install.sh.
 EOF
 }
 
@@ -142,6 +149,7 @@ prompt_value() {
   local varname="$1"
   local prompt_text="$2"
   local default="${3:-}"
+  local required="${4:-required}"
   local current
   current="${!varname:-}"
 
@@ -152,6 +160,8 @@ prompt_value() {
   if [ "$NON_INTERACTIVE" = "1" ]; then
     if [ -n "$default" ]; then
       eval "$varname='$default'"
+    elif [ "$required" = "optional" ]; then
+      : # leave empty -- caller treats empty as "not configured", not an error
     else
       err "Non-interactive mode: $varname is required but not set"
     fi
@@ -203,10 +213,33 @@ while [[ $# -gt 0 ]]; do
     --install-path)      INSTALL_PATH="$2";        shift 2 ;;
     --ssh-key)           SSH_KEY="$2";             shift 2 ;;
     --github-pat)        GITHUB_PAT="$2";          shift 2 ;;
+    --i-know-this-is-the-template) I_KNOW_THIS_IS_THE_TEMPLATE=1; shift ;;
     -h|--help)           usage; exit 0 ;;
     *) err "Unknown argument: $1 (try --help)" ;;
   esac
 done
+
+# ── Guard: refuse a local install that would provision the blank_node ─────────
+# template itself in place. This is exactly how the T438/T440 test debris
+# (stray systemd timers, an overwritten state/agent_config.env, orphaned Loom
+# DBs) accumulated in the past — install.sh was run locally, which always
+# installs into wherever it physically lives, so testing it in the template
+# checkout made the template itself a live agent instance. Local installs
+# have no --install-path of their own (only --remote does), so there is no
+# other structural way to catch this. Detected via the git origin remote
+# rather than a hardcoded path, so it still works if the template checkout
+# is renamed or relocated. For real testing, use scripts/dev/test_install.sh,
+# which clones to a disposable directory and cleans up unconditionally.
+if [ "$REMOTE" = "0" ] && [ "${I_KNOW_THIS_IS_THE_TEMPLATE:-0}" != "1" ]; then
+  _origin_url="$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || true)"
+  if [[ "$_origin_url" == *"lainiwakuraagent-lgtm/node"* ]]; then
+    err "Refusing to install locally into the blank_node template itself ($PROJECT_DIR).
+       Use scripts/dev/test_install.sh for a disposable test instance instead.
+       If you genuinely intend to make this template checkout a live agent,
+       rerun with --i-know-this-is-the-template."
+  fi
+  unset _origin_url
+fi
 
 # ── Remote mode early validation ──────────────────────────────────────────────
 
@@ -325,7 +358,7 @@ if [ "$SKIP_TELEGRAM" = "0" ]; then
   if [ "$NON_INTERACTIVE" = "0" ]; then
     printf "  (Leave Telegram token blank to skip Telegram setup)\n"
   fi
-  prompt_value TELEGRAM_TOKEN "Telegram bot token" "" 2>/dev/null || true
+  prompt_value TELEGRAM_TOKEN "Telegram bot token" "" optional
   if [ -n "${TELEGRAM_TOKEN:-}" ]; then
     prompt_value TELEGRAM_CHAT_ID "Telegram chat ID (your user ID)" ""
   fi
@@ -335,7 +368,7 @@ if [ "$SKIP_NEXUS" = "0" ]; then
   if [ "$NON_INTERACTIVE" = "0" ]; then
     printf "  (Leave Nexus URL blank to skip Nexus setup)\n"
   fi
-  prompt_value NEXUS_URL "Nexus URL" "$NEXUS_URL" 2>/dev/null || true
+  prompt_value NEXUS_URL "Nexus URL" "$NEXUS_URL" optional
   # NEXUS_PASSWORD is auto-generated in Step 5 if not provided via --nexus-password / env.
 fi
 
@@ -833,27 +866,58 @@ Environment=PROJECT_DIR=${INSTALL_ROOT}
 Environment=PATH=${_UNIT_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/bash ${INSTALL_ROOT}/scripts/executional/wake.sh \\
   ${INSTALL_ROOT}/prompts/persona.txt
-CPUQuota=40%
-MemoryMax=512M
-IOWeight=100
 TimeoutStartSec=7h
+TimeoutStopSec=120
+CPUQuota=40%
+MemoryHigh=1G
+MemoryMax=1536M
+IOWeight=100
 
 [Install]
 WantedBy=default.target"
     info "Written ${AGENT_SLUG}-night-agent.service"
 
-    # night-agent.timer
+    # night-agent.timer — OnCalendar lines generated from config/session_schedule.json (seam A).
+    # For remote installs the schedule is read from the local PROJECT_DIR (the source template);
+    # the remote host's own schedule may diverge post-install, but that is expected — install.sh
+    # only writes the initial unit, not subsequent schedule changes.
+    _SCHEDULE_SRC="${PROJECT_DIR}/config/session_schedule.json"
+    _ONCALENDAR_LINES=$(python3 - "$_SCHEDULE_SRC" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path) as f:
+        s = json.load(f)
+except Exception as e:
+    sys.stderr.write(f"WARNING: cannot read {path}: {e}\nFalling back to hardcoded schedule.\n")
+    # Hardcoded fallback matches the historical template values.
+    for t in ["23:00","01:10","02:25","03:40","04:05","04:30","04:55"]:
+        h, m = t.split(':')
+        print(f"OnCalendar=*-*-* {int(h):02d}:{int(m):02d}:00")
+    sys.exit(0)
+seen = set()
+for w in s.get("windows", []):
+    if not w.get("enabled", True):
+        continue
+    for t in w.get("triggers", []):
+        if t in seen:
+            continue
+        seen.add(t)
+        h, m = t.split(":")
+        print(f"OnCalendar=*-*-* {int(h):02d}:{int(m):02d}:00")
+PYEOF
+)
     _write_unit_file "${SYSTEMD_USER_DIR}/${AGENT_SLUG}-night-agent.timer" \
 "[Unit]
 Description=Night Agent Timer — ${AGENT_NAME}
 Requires=${AGENT_SLUG}-night-agent.service
 
 [Timer]
-OnCalendar=*-*-* 23:00:00
-OnCalendar=*-*-* 01:10:00
-OnCalendar=*-*-* 02:25:00
-OnCalendar=*-*-* 03:40:00
-OnCalendar=*-*-* 04:55:00
+${_ONCALENDAR_LINES}
+# Hourly probe: lets one_off[] entries (custom windows synced from khal) fire
+# outside fixed nightly windows. check_window.py's Gate 2 rejects most of
+# these quickly; on a normal night the overhead is negligible.
+OnCalendar=*-*-* *:15:00
 Persistent=false
 
 [Install]
@@ -879,9 +943,9 @@ ExecStart=/usr/bin/bash ${INSTALL_ROOT}/scripts/conversational/conversation.sh \
   ${INSTALL_ROOT}/prompts/conversation.md
 Restart=on-failure
 RestartSec=30
-KillMode=process
 CPUQuota=20%
-MemoryMax=256M
+MemoryHigh=512M
+MemoryMax=1G
 
 [Install]
 WantedBy=default.target"
