@@ -126,27 +126,28 @@ while true; do
     SESSION_OUT="$LOG_DIR/channel_${CHANNEL_ID}_$(date +%Y-%m-%d)_${RESTART_COUNT}.out"
     SESSION_ERR="$LOG_DIR/channel_${CHANNEL_ID}_$(date +%Y-%m-%d)_${RESTART_COUNT}.err"
 
-    # Build prompt: agent_channel.md + optional persona, substituting tokens
+    # Build prompt: agent_channel.md + comms orientation + optional persona, substituting tokens
     SESSION_PROMPT=$(mktemp "$STATE_DIR/channel_prompt.XXXXXX.md")
-    if [ -f "$PERSONA_FILE" ]; then
-        {
-            sed \
-                -e "s/\${AGENT_NAME}/${AGENT_NAME}/g" \
-                -e "s/\${OWNER_NAME}/${OWNER_NAME}/g" \
-                -e "s/\${CHANNEL_ID}/${CHANNEL_ID}/g" \
-                "$PROMPT_FILE"
-            echo ""
-            echo "---"
-            echo ""
-            cat "$PERSONA_FILE"
-        } > "$SESSION_PROMPT"
-    else
+    ORIENTATION_FILE="$PROJECT_DIR/prompts/comms_orientation.md"
+    {
         sed \
             -e "s/\${AGENT_NAME}/${AGENT_NAME}/g" \
             -e "s/\${OWNER_NAME}/${OWNER_NAME}/g" \
             -e "s/\${CHANNEL_ID}/${CHANNEL_ID}/g" \
-            "$PROMPT_FILE" > "$SESSION_PROMPT"
-    fi
+            "$PROMPT_FILE"
+        if [ -f "$ORIENTATION_FILE" ]; then
+            echo ""
+            echo "---"
+            echo ""
+            cat "$ORIENTATION_FILE"
+        fi
+        if [ -f "$PERSONA_FILE" ]; then
+            echo ""
+            echo "---"
+            echo ""
+            cat "$PERSONA_FILE"
+        fi
+    } > "$SESSION_PROMPT"
 
     EXIT_CODE=0
     set +e

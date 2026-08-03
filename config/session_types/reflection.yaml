@@ -13,7 +13,7 @@ context_files:
   - memory/latest_summary.md
   - logs/maintenance_decisions.md
   - state/behavioral_context.txt
-  - memory/work/soul.md
+  - memory/identity/soul.md
   - memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md
   - memory/narrative_log.md
 

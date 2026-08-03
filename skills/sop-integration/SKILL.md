@@ -34,5 +34,3 @@ The output is a working message/data flow between them.
 - Failure mode behavior is known (not necessarily handled, but documented)
 - Protocol documented in learnings_digest.md or architecture file
 
-## Full SOP
-See: `memory/work/sop/sop_integration.md`

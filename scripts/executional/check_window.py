@@ -142,7 +142,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         try:
             dt = datetime.fromisoformat(dt_str)
             diff_sec = abs((now - dt.replace(tzinfo=None)).total_seconds())
-            if diff_sec <= TRIGGER_TOLERANCE_SEC:
+            tolerance_sec = entry.get('tolerance_sec', TRIGGER_TOLERANCE_SEC)
+            if diff_sec <= tolerance_sec:
                 one_off_hit = True
                 one_off_label = entry.get('label', 'unnamed')
                 one_off_type = entry.get('type', 'work')

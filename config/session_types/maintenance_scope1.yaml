@@ -6,7 +6,6 @@ context_files:
   - memory/latest_summary.md
   - memory/learnings.md
   - memory/index.md
-  - memory/progress.md
   - logs/session_log.csv
   - memory/work/pending_decisions.md
 

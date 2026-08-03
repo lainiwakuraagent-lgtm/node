@@ -33,5 +33,3 @@ pushing agent configs to remote machines, verifying first run.
 - Log evidence of first successful execution
 - pending_decisions.md updated
 
-## Full SOP
-See: `memory/work/sop/sop_deployment.md` and `memory/work/sop/sop_agent_architecture.md`

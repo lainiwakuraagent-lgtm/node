@@ -2,25 +2,40 @@
 """
 memory_search.py — Search across the agent memory corpus.
 
-Built 2026-07-07 by @Lain.
-Motivation: each session I read the same 3 static files. "What did I decide about X?"
-had no fast answer. This is that fast answer.
+Built 2026-07-07 by @Lain. Refactored 2026-08-01 to discover scopes from
+whatever actually exists under memory/ instead of a hardcoded path list —
+the previous version silently missed new top-level dirs added after it was
+written (this is exactly what happened when memory/identity/ and
+memory/knowledge/ were split out of memory/work/: nothing broke loudly,
+--scope all just quietly stopped covering them) and still referenced a
+memory/conversation.md that was never a real path. A fixed list can't stay
+correct as the memory structure evolves across template clones; discovery
+can.
 
 Usage:
-  python3 tools/memory_search.py <query> [options]
+  python3 tools/executional/memory_search.py <query> [options]
 
 Options:
-  --scope all|sessions|work|core|logs   (default: all)
+  --scope SCOPE                         see --list-scopes for what's available
+                                         (default: all)
+  --list-scopes                         print available scopes and exit
   --context N                           lines of context around each match (default: 2)
   --case-sensitive                      (default: case-insensitive)
   --max N                               max matches to display (default: 100)
   --files-only                          show only filenames, no line content
 
+Scopes are discovered at run time from memory/'s actual top-level entries
+(one scope per file or directory found there), plus two fixed ones:
+  all    -- everything under memory/, recursively
+  core   -- the small set of always-relevant navigation files
+  logs   -- logs/, for session/wake-log digging
+
 Examples:
-  python3 tools/memory_search.py "tailscale ssh"
-  python3 tools/memory_search.py "ideapad-5" --scope sessions
-  python3 tools/memory_search.py "Phase 4" --context 3 --scope work
-  python3 tools/memory_search.py "relationship_update" --files-only
+  python3 tools/executional/memory_search.py "tailscale ssh"
+  python3 tools/executional/memory_search.py "ideapad-5" --scope sessions
+  python3 tools/executional/memory_search.py "Phase 4" --context 3 --scope identity
+  python3 tools/executional/memory_search.py "relationship_update" --files-only
+  python3 tools/executional/memory_search.py --list-scopes
 """
 
 import os
@@ -31,45 +46,54 @@ from pathlib import Path
 
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path(__file__).resolve().parent.parent.parent))
 MEMORY_DIR = PROJECT_DIR / "memory"
+LOGS_DIR = PROJECT_DIR / "logs"
 
-SCOPES = {
-    "all": [
-        MEMORY_DIR / "sessions",
-        MEMORY_DIR / "work",
-        MEMORY_DIR / "learnings.md",
-        MEMORY_DIR / "learnings_digest.md",
-        MEMORY_DIR / "progress.md",
-        MEMORY_DIR / "latest_summary.md",
-        MEMORY_DIR / "narrative_log.md",
-        MEMORY_DIR / "index.md",
-        MEMORY_DIR / "conversation.md",
-    ],
-    "sessions": [MEMORY_DIR / "sessions"],
-    "work": [MEMORY_DIR / "work"],
-    "core": [
-        MEMORY_DIR / "learnings_digest.md",
-        MEMORY_DIR / "progress.md",
-        MEMORY_DIR / "latest_summary.md",
-        MEMORY_DIR / "narrative_log.md",
-    ],
-    "logs": [PROJECT_DIR / "logs"],
-}
+READABLE_SUFFIXES = {".md", ".txt", ".csv", ".log", ".sh", ".py", ".json"}
 
-READABLE_SUFFIXES = {".md", ".txt", ".csv", ".log", ".sh", ".py"}
+# Fixed navigation-file shortlist -- curated, not "whatever happens to be at
+# the top level," since not every top-level file belongs in the quick-scan set.
+CORE_FILES = ["latest_summary.md", "index.md", "MEMORY_MAP.md",
+              "learnings_digest.md", "narrative_log.md"]
+
+
+def discover_scopes() -> dict:
+    """
+    Build the scope -> [paths] mapping from what's actually on disk under
+    memory/, plus the two fixed scopes (all, core) and logs/. Re-run every
+    invocation -- cheap (a single non-recursive listdir), and it means a
+    newly-added memory/whatever/ is searchable immediately, no code change.
+    """
+    scopes = {"all": [MEMORY_DIR], "logs": [LOGS_DIR]}
+    scopes["core"] = [MEMORY_DIR / f for f in CORE_FILES]
+
+    if MEMORY_DIR.exists():
+        for entry in sorted(MEMORY_DIR.iterdir()):
+            if entry.name.startswith("."):
+                continue
+            if entry.is_dir():
+                scopes[entry.name] = [entry]
+            elif entry.is_file() and entry.suffix in READABLE_SUFFIXES:
+                scopes[entry.stem] = [entry]
+
+    return scopes
 
 
 def collect_files(paths):
     """Collect all readable files from a list of paths (files or directories)."""
     files = []
+    seen = set()
     for p in paths:
         if not p.exists():
             continue
         if p.is_file() and p.suffix in READABLE_SUFFIXES:
-            files.append(p)
+            if p not in seen:
+                files.append(p)
+                seen.add(p)
         elif p.is_dir():
             for f in sorted(p.rglob("*")):
-                if f.is_file() and f.suffix in READABLE_SUFFIXES:
+                if f.is_file() and f.suffix in READABLE_SUFFIXES and f not in seen:
                     files.append(f)
+                    seen.add(f)
     return files
 
 
@@ -94,56 +118,38 @@ def search_file(path, pattern, context_lines):
     return results
 
 
-def merge_overlapping(matches, context_lines):
-    """Merge match records whose context windows overlap."""
-    if not matches:
-        return []
-
-    merged = []
-    current = matches[0]
-    current_end = current["context_start"] + len(current["context"]) - 1
-
-    for m in matches[1:]:
-        m_start = m["context_start"]
-        if m_start <= current_end + 1:
-            # Overlapping — extend current block
-            new_end = m["context_start"] + len(m["context"]) - 1
-            if new_end > current_end:
-                # Extend context list
-                extra_start = current_end + 1
-                extra_end = new_end
-                # We'd need the original lines to extend properly.
-                # For simplicity, just track which line_nums are matches.
-                current["_extra_end"] = extra_end
-            current_end = max(current_end, m["context_start"] + len(m["context"]) - 1)
-            if "extra_matches" not in current:
-                current["extra_matches"] = []
-            current["extra_matches"].append(m["line_num"])
-        else:
-            merged.append(current)
-            current = m
-            current_end = current["context_start"] + len(current["context"]) - 1
-
-    merged.append(current)
-    return merged
-
-
 def format_separator(char="─", width=52):
     return f"╾{'─' * width}╼"
 
 
+def print_scopes(scopes: dict):
+    print("Available scopes (discovered from memory/'s current contents):\n")
+    for name, paths in scopes.items():
+        existing = [p for p in paths if p.exists()]
+        status = "" if existing else "  (empty / not created yet)"
+        shown = ", ".join(str(p.relative_to(PROJECT_DIR)) for p in paths[:3])
+        print(f"  {name:<20} {shown}{status}")
+    print()
+
+
 def main():
+    scopes = discover_scopes()
+
     parser = argparse.ArgumentParser(
         description="Search the agent memory corpus",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("query", help="Search term (substring, regex-escaped by default)")
+    parser.add_argument("query", nargs="?", help="Search term (substring, regex-escaped by default)")
     parser.add_argument(
         "--scope",
-        choices=list(SCOPES.keys()),
         default="all",
-        help="Which memory scope to search (default: all)",
+        help="Which memory scope to search (default: all). See --list-scopes.",
+    )
+    parser.add_argument(
+        "--list-scopes",
+        action="store_true",
+        help="Print available scopes (discovered from memory/'s current contents) and exit",
     )
     parser.add_argument(
         "--context",
@@ -172,6 +178,18 @@ def main():
 
     args = parser.parse_args()
 
+    if args.list_scopes:
+        print_scopes(scopes)
+        return
+
+    if not args.query:
+        parser.error("query is required (or use --list-scopes)")
+
+    if args.scope not in scopes:
+        print(f"Unknown scope: {args.scope!r}", file=sys.stderr)
+        print_scopes(scopes)
+        sys.exit(1)
+
     flags = 0 if args.case_sensitive else re.IGNORECASE
     try:
         pattern = re.compile(re.escape(args.query), flags)
@@ -179,7 +197,7 @@ def main():
         print(f"Invalid query: {e}", file=sys.stderr)
         sys.exit(1)
 
-    paths = SCOPES[args.scope]
+    paths = scopes[args.scope]
     files = collect_files(paths)
 
     sep = format_separator()
@@ -216,7 +234,6 @@ def main():
 
         print()
 
-        # Merge overlapping context windows for cleaner output
         prev_end = -1
         for m in matches:
             if total_matches >= args.max:
@@ -227,7 +244,6 @@ def main():
             ctx_end = ctx_start + len(m["context"]) - 1
             match_ln = m["line_num"]
 
-            # Gap separator between non-adjacent context blocks
             if prev_end >= 0 and ctx_start > prev_end + 1:
                 print(f"   {'·' * 3}")
 
@@ -235,7 +251,6 @@ def main():
                 lineno = ctx_start + j
                 is_match = (lineno == match_ln)
                 marker = "▶" if is_match else " "
-                # Truncate very long lines
                 display = ctx_line[:200] + ("…" if len(ctx_line) > 200 else "")
                 print(f"   {marker} {lineno:5d} │ {display}")
 

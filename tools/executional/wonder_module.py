@@ -24,7 +24,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent.parent
-WONDER_DIR = PROJECT_DIR / "memory" / "work" / "wonder_sessions"
+WONDER_DIR = PROJECT_DIR / "memory" / "identity" / "wonder_sessions"
 LOOM_DB = Path.home() / ".local" / "share" / "loom" / "loom.db"
 
 

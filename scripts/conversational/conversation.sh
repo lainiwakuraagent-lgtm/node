@@ -202,17 +202,22 @@ while true; do
     # types) -- substitute them here since this path never goes through that
     # resolver.
     SESSION_PROMPT=$(mktemp "$STATE_DIR/conv_prompt.XXXXXX.md")
-    if [ -f "$PERSONA_FILE" ]; then
-        {
-            sed -e "s/\${AGENT_NAME}/${AGENT_NAME}/g" -e "s/\${OWNER_NAME}/${OWNER_NAME}/g" "$PROMPT_FILE"
+    ORIENTATION_FILE="$PROJECT_DIR/prompts/comms_orientation.md"
+    {
+        sed -e "s/\${AGENT_NAME}/${AGENT_NAME}/g" -e "s/\${OWNER_NAME}/${OWNER_NAME}/g" "$PROMPT_FILE"
+        if [ -f "$ORIENTATION_FILE" ]; then
+            echo ""
+            echo "---"
+            echo ""
+            cat "$ORIENTATION_FILE"
+        fi
+        if [ -f "$PERSONA_FILE" ]; then
             echo ""
             echo "---"
             echo ""
             cat "$PERSONA_FILE"
-        } > "$SESSION_PROMPT"
-    else
-        sed -e "s/\${AGENT_NAME}/${AGENT_NAME}/g" -e "s/\${OWNER_NAME}/${OWNER_NAME}/g" "$PROMPT_FILE" > "$SESSION_PROMPT"
-    fi
+        fi
+    } > "$SESSION_PROMPT"
 
     # Launch Claude Code in conversation mode.
     # set +e around the launch: this is a restart loop, so a crashed/nonzero

@@ -31,6 +31,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -294,15 +295,19 @@ def _save_inbox_file(content: bytes, filename: str, caption: str, file_type: str
     rel_path = str(dest.relative_to(PROJECT_DIR))
 
     entry = {
+        "id": uuid.uuid4().hex[:12],
         "source": "telegram",
         "from": from_,
         "content": caption if caption else f"[file: {filename}, no caption]",
         "timestamp": ts,
-        "type": "file_delivery",
-        "file_path": rel_path,
-        "file_name": filename,
-        "file_type": file_type,
-        "mime_type": mime_type,
+        "type": "request",
+        "kind": "task",
+        "attached_file": {
+            "file_path": rel_path,
+            "file_name": filename,
+            "file_type": file_type,
+            "mime_type": mime_type,
+        },
         "processed": False,
     }
 

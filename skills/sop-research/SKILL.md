@@ -1,40 +1,45 @@
 ---
 name: sop-research
-description: Procedure for tasks tagged research — open-ended exploration of a domain or question without a predetermined answer.
+description: Procedure for tasks tagged research — concrete steps for surveying a domain or question in this codebase, not a general research framework.
 ---
 
 # SOP — Research
 
 ## When this applies
 Any task tagged `research`: surveying a domain, assessing feasibility, reviewing prior
-work, or synthesizing understanding. The output is knowledge, not a decision or implementation.
+work, or synthesizing understanding. The output is knowledge, not a decision
+(`design`'s job) or an implementation.
 
 ## Procedure
-
-1. **Frame the question.** State what you are trying to find out. If the question has
-   a known answer, this is not research — it's a docs or chore task.
-
-2. **Set a scope boundary.** Research without a boundary runs forever. Define:
-   - What sources/approaches you will cover
-   - When you will stop (time, context budget, or "when the question is answered")
-
-3. **Explore and document.** Take notes as you go into `memory/work/goal_N/{topic}_research.md`.
-   Do not wait until the end — notes are the output.
-
-4. **Synthesize.** When scope is exhausted or question answered, write a synthesis section:
-   - What was found
-   - What remains uncertain
-   - What the next step should be (design, blocked_owner, or another research arc)
-
-5. **Transition.** Research rarely ends cleanly. End with either:
-   - A design task (if findings need to become a decision)
-   - A blocked_owner task (if owner input is required)
-   - A note in learnings_digest.md (if findings are architectural/environmental)
+1. **Check what's already known before looking anywhere else.** Run
+   `python3 tools/executional/memory_search.py "<topic>"` and check `memory/MEMORY_MAP.md`.
+   The likely failure isn't missing a source — it's re-deriving something already
+   written down. Skip straight to step 2 only if the search comes back empty.
+2. **Name your actual sources as you go, not after.** For an internal question: the
+   specific files/paths read (`grep`/`Read` targets), not "reviewed the codebase." For
+   an external question: the specific doc, command `--help` output, or page consulted
+   — a claim with no traceable source doesn't belong in the synthesis.
+3. **Stop on a concrete condition, not a vague one.** Pick one before you start: "the N
+   most authoritative sources agree," "the specific question in the task is answered,"
+   or "context budget for this task is exhausted." Write down which one applies before
+   you begin — don't let the boundary get decided in hindsight.
+4. **Take notes as you go**, into `memory/work/goal_<id>/{topic}_research.md` or
+   `memory/work/project_<id>/{topic}_research.md` (match the task's actual goal/project
+   — see `memory_strategy.md` for which folder is yours). Notes are the output, not a
+   scratch pad discarded before a final write-up.
+5. **Synthesize explicitly**: what was found, what remains uncertain, and one of three
+   named transitions — a `design` task (if findings need to become a decision), a
+   `blocked_owner` task (if owner input is required), or an update to
+   `memory/knowledge/<slug>.md` (if the finding is a durable fact worth carrying, per
+   `memory_strategy.md`'s one-topic-per-file rule).
 
 ## Definition of done
-- A synthesis doc exists in `memory/work/`.
-- The next step is explicitly named (design task, or "blocked on owner: X").
-- If findings affect the system's behavior or environment, learnings.md is updated.
+- A synthesis section exists in the notes file, with sources actually named, not implied.
+- The stopping condition chosen in step 3 is stated, and was actually met.
+- The next step is one of the three named transitions in step 5 — not left implicit.
 
-## Full SOP
-See: `memory/work/sop/sop_research.md`
+## Do not
+- Write "explored several options" without naming which ones and where they came from.
+- Keep researching past the stopping condition because the answer still isn't fully
+  satisfying — an unsatisfying-but-bounded answer transitions to `design` or
+  `blocked_owner`; it doesn't justify an unbounded search.

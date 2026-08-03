@@ -2,9 +2,9 @@ id: execution
 name: "Execution Session"
 description: >
   Work sessions focused on completing queued Loom tasks. Proceed directly
-  from the next action in progress.md. No re-planning unless a hard blocker
-  is encountered. Ship an artifact every session — something written, built,
-  or modified. A session without output is wasted.
+  from the next scheduled task in loom_context.json. No re-planning unless a
+  hard blocker is encountered. Ship an artifact every session — something
+  written, built, or modified. A session without output is wasted.
 
 prompt_file: "prompts/session_types/execution_prompt.md"
 
@@ -13,7 +13,6 @@ context_files:
   - memory/learnings_digest.md
   - state/behavioral_context.txt
   - state/loom_context.json
-  - memory/progress.md
 
 behavioral_overrides:
   focus_mode: high
@@ -22,7 +21,7 @@ behavioral_overrides:
   memory_discipline: normal
 
 focus_hint: >
-  Execute. Pick the next task from progress.md or loom_context.json and work it
+  Execute. Pick the next task from loom_context.json and work it
   completely. Check time and context after each task. If you finish one, continue
   to the next — don't stop until a hard limit forces it. Anything not written to
   disk is lost when the session ends.

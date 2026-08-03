@@ -63,7 +63,7 @@ STATE_DIR = PROJECT_DIR / "state"
 LOGS_DIR = PROJECT_DIR / "logs"
 TOOLS_DIR = PROJECT_DIR / "tools"
 MEMORY_DIR = PROJECT_DIR / "memory"
-SCRIPTS_DIR = PROJECT_DIR / "scripts"
+SCRIPTS_DIR = PROJECT_DIR / "scripts" / "executional"
 
 LOOM_SRC = pathlib.Path.home() / "lain" / "loom"
 LOOM_DB = (pathlib.Path(os.environ["LOOM_DB"]) if "LOOM_DB" in os.environ
@@ -1182,7 +1182,7 @@ def main():
         LOGS_DIR = PROJECT_DIR / "logs"
         TOOLS_DIR = PROJECT_DIR / "tools"
         MEMORY_DIR = PROJECT_DIR / "memory"
-        SCRIPTS_DIR = PROJECT_DIR / "scripts"
+        SCRIPTS_DIR = PROJECT_DIR / "scripts" / "executional"
         ANALYTICS_DB = LOGS_DIR / "analytics.db"
         SESSION_LOG_CSV = LOGS_DIR / "session_log.csv"
         SCHEDULE_FILE = STATE_DIR / "schedule.json"

@@ -1,11 +1,15 @@
 id: planning
 name: "Planning Session"
 description: >
-  Strategic review sessions. Use when the current approach is stuck, unclear,
-  or has accumulated multiple failed attempts with no clean path forward.
-  The output of a planning session is a revised strategy — updated progress.md,
-  new or reorganized Loom tasks, clearer next steps. Do not execute implementation
-  work in a planning session; the whole point is to think first.
+  Strategic thinking sessions with two triggers: a needs_plan-status
+  goal/project/task exists (traditional decomposition), or the inbox holds
+  unprocessed communicational-layer input that needs absorbing into the
+  real pipeline (newer, equally important). tools/inbox.py already handles
+  mechanical type-routing; this session's job on the inbox side is sweeping
+  what that produced (triage-status tasks) into actual goal/project/task
+  structure. On the decomposition side: reorganized Loom tasks and clearer
+  next steps, recorded in the relevant goal/project folder. No
+  implementation work either way — the point is to think and route first.
 
 prompt_file: "prompts/session_types/planning_prompt.md"
 
@@ -14,8 +18,10 @@ context_files:
   - memory/learnings_digest.md
   - state/behavioral_context.txt
   - state/loom_context.json
-  - memory/progress.md
   - memory/index.md
+  - inbox/pending.json
+  - memory/work/context_updates.md
+  - memory/work/agent_messages.md
 
 behavioral_overrides:
   focus_mode: normal
@@ -24,10 +30,14 @@ behavioral_overrides:
   memory_discipline: normal
 
 focus_hint: >
-  Plan. Review what's been attempted, what failed, and why. Look at the whole
-  goal picture — not just the next task. Update progress.md with a revised
-  approach. Create or reorganize Loom tasks to reflect the new plan.
-  The artifact you ship is a clearer path, not code.
+  Plan and route. Check why you're here: needs_plan item, inbox backlog, or
+  both. If the inbox has unprocessed entries or triage-status tasks, sweep
+  those first -- decide real status/goal/project for each, don't leave them
+  sitting. Then review what's been attempted on the goal itself, what
+  failed and why. Reorganize Loom tasks to reflect both the routing and the
+  plan, and record the revised approach in the goal/project's own folder if
+  it's substantial enough to need one. The artifact you ship is a clearer
+  path plus a processed inbox, not code.
 
 allowed_triggers:
   - nightly

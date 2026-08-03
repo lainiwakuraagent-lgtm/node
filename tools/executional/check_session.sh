@@ -153,20 +153,26 @@ EOF
 }
 
 # =============================================================================
-# --context — estimated context window fill percentage
+# --context — real context window fill percentage
 #
-# METHOD (v2 — character-level parsing): parses the current session's .jsonl
-# transcript and sums the character count of all message content fields.
-# Content chars / 4 ~= token count. This is ~6-7x more accurate than the
-# older file_bytes/4 estimate, which is retained here only for reference.
+# METHOD (v3 — real API usage, not estimated): every assistant transcript
+# entry carries the real usage field from the Anthropic API response
+# (input_tokens, cache_creation_input_tokens, cache_read_input_tokens) --
+# the exact token count the model was actually sent on that turn. Reads the
+# LAST such entry directly instead of reconstructing an approximation from
+# raw transcript characters.
 #
-# KNOWN LIMITATION: chars/4 overestimates tokens for JSON/code-heavy content
-# (closer to 2-3 chars/token). Treat any reading < 50% as "comfortable" and
-# > 70% as "prepare to wrap up."
+# Prior char-counting methods (v1: file_bytes/4, v2: content_chars/4) were
+# both estimates and both wrong in ways that compounded: v2 silently excluded
+# tool_result and thinking block content (stored under 'content'/'thinking'
+# keys, not the 'text'/'input' keys it checked), and even correcting for
+# that, chars/4 undercounted real usage by roughly 2x for tool/code-heavy
+# sessions. Measured on a real session: v2 reported 15% where real usage was
+# 40%.
 # =============================================================================
 cmd_context() {
   local CONTEXT_WINDOW_TOKENS=200000
-  local CHARS_PER_TOKEN_ESTIMATE=4
+  local EXTENDED_CONTEXT_WINDOW_TOKENS=1000000
   local WARN_PCT=70
 
   local CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -179,10 +185,26 @@ cmd_context() {
     return 0
   fi
 
+  # Scope the transcript search to the current project's directory.
+  # Priority 1: CLAUDE_CODE_SESSION_ID + project slug (exact, no globbing needed).
+  # Priority 2: find most-recent in current project's transcript dir (scoped, not all projects).
+  # Priority 3: fallback to all projects (broken original behavior, only if scoped dir missing).
+  local project_slug SCOPED_DIR
+  project_slug=$(echo "$PROJECT_DIR" | sed 's|[/_]|-|g')
+  SCOPED_DIR="$PROJECTS_DIR/${project_slug}"
+
   local latest_transcript
-  latest_transcript=$(find "$PROJECTS_DIR" -name '*.jsonl' -type f \
-    -printf '%T@ %p\n' 2>/dev/null \
-    | sort -rn | head -n1 | cut -d' ' -f2-)
+  if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -f "$SCOPED_DIR/${CLAUDE_CODE_SESSION_ID}.jsonl" ]; then
+    latest_transcript="$SCOPED_DIR/${CLAUDE_CODE_SESSION_ID}.jsonl"
+  elif [ -d "$SCOPED_DIR" ]; then
+    latest_transcript=$(find "$SCOPED_DIR" -name '*.jsonl' -type f \
+      -printf '%T@ %p\n' 2>/dev/null \
+      | sort -rn | head -n1 | cut -d' ' -f2-) || true
+  else
+    latest_transcript=$(find "$PROJECTS_DIR" -name '*.jsonl' -type f \
+      -printf '%T@ %p\n' 2>/dev/null \
+      | sort -rn | head -n1 | cut -d' ' -f2-) || true
+  fi
 
   if [ -z "${latest_transcript:-}" ]; then
     echo "context_pct_estimate: unknown"
@@ -191,14 +213,12 @@ cmd_context() {
     return 0
   fi
 
-  local file_bytes
-  file_bytes=$(stat -c%s "$latest_transcript" 2>/dev/null || stat -f%z "$latest_transcript")
-
-  local content_chars
-  content_chars=$(python3 - "$latest_transcript" <<'PYEOF'
+  # Read the real usage field from the last assistant entry in the transcript.
+  local usage_line
+  usage_line=$(python3 - "$latest_transcript" <<'PYEOF'
 import sys, json
 
-total = 0
+latest_usage = {}
 with open(sys.argv[1], 'r', errors='replace') as f:
     for line in f:
         line = line.strip()
@@ -208,34 +228,39 @@ with open(sys.argv[1], 'r', errors='replace') as f:
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
-        msg = obj.get('message', obj)
-        content = msg.get('content', '')
-        if isinstance(content, str):
-            total += len(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict):
-                    text = block.get('text', '') or block.get('input', '')
-                    if isinstance(text, str):
-                        total += len(text)
-                    elif isinstance(text, dict):
-                        total += len(json.dumps(text))
-print(total)
+        if obj.get('type') != 'assistant':
+            continue
+        usage = obj.get('message', obj).get('usage')
+        if usage:
+            latest_usage = usage
+
+inp = latest_usage.get('input_tokens', 0)
+cc = latest_usage.get('cache_creation_input_tokens', 0)
+cr = latest_usage.get('cache_read_input_tokens', 0)
+print(inp, cc, cr, inp + cc + cr)
 PYEOF
 )
+  local input_tokens cache_creation_tokens cache_read_tokens real_context_tokens
+  read -r input_tokens cache_creation_tokens cache_read_tokens real_context_tokens <<< "$usage_line"
 
-  local estimated_tokens=$(( content_chars / CHARS_PER_TOKEN_ESTIMATE ))
-  local pct=$(( estimated_tokens * 100 / CONTEXT_WINDOW_TOKENS ))
-
-  local file_est_tokens=$(( file_bytes / CHARS_PER_TOKEN_ESTIMATE ))
-  local file_pct=$(( file_est_tokens * 100 / CONTEXT_WINDOW_TOKENS ))
+  # A successful API call can't exceed the model's actual context window, so if
+  # real usage is already above the standard 200k, the call must have run under
+  # the extended (1M) context beta -- switch denominators rather than report
+  # a nonsensical >100%. This matters for the conversational/Telegram layer,
+  # which can legitimately use extended context for long-running threads.
+  local window="$CONTEXT_WINDOW_TOKENS"
+  if [ "$real_context_tokens" -gt "$CONTEXT_WINDOW_TOKENS" ]; then
+    window="$EXTENDED_CONTEXT_WINDOW_TOKENS"
+  fi
+  local pct=$(( real_context_tokens * 100 / window ))
 
   echo "transcript_file: $latest_transcript"
-  echo "transcript_bytes: $file_bytes"
-  echo "file_size_est_pct: ${file_pct}%  (old method -- unreliable, ~6-7x inflated)"
-  echo "content_chars: $content_chars"
-  echo "estimated_tokens: $estimated_tokens"
-  echo "context_pct_estimate: ${pct}%  (content-char method)"
+  echo "real_input_tokens: $input_tokens"
+  echo "real_cache_creation_tokens: $cache_creation_tokens"
+  echo "real_cache_read_tokens: $cache_read_tokens"
+  echo "real_context_tokens: $real_context_tokens"
+  echo "context_window_used: $window"
+  echo "context_pct_estimate: ${pct}%  (real API usage, not estimated)"
 
   if [ "$pct" -ge "$WARN_PCT" ]; then
     echo "ACTION: context usage estimated above ${WARN_PCT}% -- stop new work, begin shutdown and memory write now."

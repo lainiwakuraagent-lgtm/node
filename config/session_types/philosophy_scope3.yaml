@@ -1,0 +1,18 @@
+scope_id: 3
+scope_name: "Blocker Resolution"
+scope_slug: blocker
+
+context_files:
+  - memory/latest_summary.md
+  - state/loom_context.json
+  - memory/identity/soul.md
+  - memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md
+  - memory/identity/${AGENT_NAME}_notes.md
+
+focus_hint: >
+  Blocker Resolution. Wonder and expression work are done -- this tier has
+  one target: blocked_owner tasks, treated as hypotheses, not facts.
+  Question whether each block is real, reframeable, or partially workable
+  now. At most one sub-task created this session -- manufacturing busywork
+  to dodge the cap is not the goal; if nothing genuinely moves, say so and
+  let the cap fire.

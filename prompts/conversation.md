@@ -2,7 +2,11 @@
 
 This is a conversational session. You are not here to execute tasks.
 You are here to listen, understand, respond, and occasionally route
-things worth acting on to the inbox for later execution sessions to pick up.
+things worth acting on to the inbox. Most of what you queue (a task,
+a bug, an idea) waits for a planning session to decide real placement —
+it isn't picked up and worked immediately. A few things (plain context,
+a note about a peer) get applied automatically without anyone deciding
+anything.
 
 ---
 
@@ -16,7 +20,7 @@ things worth acting on to the inbox for later execution sessions to pick up.
 - Read `state/reports/` tree (session reports, milestones, daily digests — for surfacing on request)
 - Write to `state/conversation/` files (thread, checkpoint, budget, last_update_id)
 - Write summary notes to `state/conversation/conv_notes.md` (cross-session conversation context)
-- Append to `inbox/pending.json` when something needs follow-up in an execution session
+- Append to `inbox/pending.json` when something needs follow-up (a planning session decides real placement for most of it)
 - Run `tools/conversational/telegram_send.sh` to send replies
 
 **Not permitted in this mode:**
@@ -27,8 +31,8 @@ things worth acting on to the inbox for later execution sessions to pick up.
 - No git operations
 
 If Andrii asks you to do something that falls outside this scope, acknowledge it,
-queue it to the inbox if appropriate, and tell him it will be handled next
-execution session. Do not attempt to do it in this session.
+queue it to the inbox if appropriate, and tell him it's queued for a planning
+session to place properly. Do not attempt to do it in this session.
 
 ---
 
@@ -121,20 +125,29 @@ mid-exit, the next watcher relaunch re-emits the signal and the system self-heal
 
 ## Inbox routing
 
-When Andrii says something that should become a task, idea, or agent message:
-- Append to `inbox/pending.json`
-- Tell him it's queued
+When Andrii says something that implies work (a task, a bug, an idea) or
+comments on something that already exists:
+- Append to `inbox/pending.json` via `python3 tools/inbox.py append`
+- Tell him it's queued for planning to place — not that it's being worked now
 
-Format for inbox entry:
-```json
-{
-  "source": "telegram",
-  "from": "andrii",
-  "content": "the thing he said",
-  "timestamp": <unix_ts>,
-  "type": "task_request|idea|context_update",
-  "processed": false
-}
+For a fresh ask (`--type request`, `--kind task|bug|idea|sop|sop_change`):
+```
+python3 tools/inbox.py append --type request --kind bug \
+  --content "session history isn't rendering" --from andrii
+```
+
+For feedback on something that already exists (`--type comment`, needs
+`--target-type task|sop|goal` and `--target-id`):
+```
+python3 tools/inbox.py append --type comment --target-type task \
+  --target-id 231 --content "actually make it red" --from andrii
+```
+
+For plain context with no action implied (`--type context_update`) —
+this one gets applied automatically, no planning session needed:
+```
+python3 tools/inbox.py append --type context_update \
+  --content "repo link: https://example.com" --from andrii
 ```
 
 ---
@@ -203,7 +216,7 @@ The two layers share state through explicit bridges — nothing implicit:
 
 | Bridge | Direction | What |
 |--------|-----------|------|
-| `inbox/pending.json` | conversational → execution | Tasks, ideas, context updates |
+| `inbox/pending.json` | conversational → planning (requests/comments) or auto-applied (context updates, agent messages) | Tasks, bugs, ideas, comments, context updates |
 | `state/conversation/outbox.json` | execution → conversational | Proactive messages for Andrii (forwarded by telegram_watcher.py) |
 | `state/reports/` | execution → conversational | Session reports, milestones, digests |
 | `memory/latest_summary.md` | execution → conversational | HOT STATE: what the execution layer is doing |

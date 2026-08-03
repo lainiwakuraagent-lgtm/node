@@ -274,7 +274,7 @@ def format_report(result: dict) -> str:
     if flags['has_failure']:
         lines.append("  >> Failures detected — note in learnings.md")
     if flags['has_milestone']:
-        lines.append("  >> Milestone(s) completed — update progress.md")
+        lines.append("  >> Milestone(s) completed — reflect it in the goal/project's Loom status")
     if flags['narrative_update_recommended']:
         lines.append("  >> Narrative update recommended (Tier 1 events present)")
     else:

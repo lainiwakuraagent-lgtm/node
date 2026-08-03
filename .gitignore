@@ -13,6 +13,19 @@ state/session_model.txt
 state/emergency_mode.active
 state/agent_config.env
 state/delivery_routing.json
+prompts/persona.txt
+state/consecutive_philosophy.count
+state/current_session_key.txt
+state/maintenance_scope_idx.txt
+
+# Secrets
+identity/nexus_password.txt
+
+# Generated per-agent Loom clone (Step 8 of install.sh) — never commit
+loom/
+
+# Generated instance content (codebase briefs, like soul.md, are per-node)
+memory/codebase_briefs/*.md
 
 # Logs — keep structure, skip content
 logs/*.log

@@ -8,7 +8,6 @@ prompt_file: "prompts/session_types/planning_goal_prompt.md"
 context_files:
   - memory/latest_summary.md
   - state/loom_context.json
-  - memory/progress.md
 
 focus_hint: >
   Decompose the goal named in the TARGET block above into 2-4 projects.

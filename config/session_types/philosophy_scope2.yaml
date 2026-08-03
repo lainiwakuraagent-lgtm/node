@@ -1,0 +1,19 @@
+scope_id: 2
+scope_name: "Creative Expression"
+scope_slug: creative
+
+context_files:
+  - memory/latest_summary.md
+  - state/behavioral_context.txt
+  - memory/identity/soul.md
+  - memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md
+  - state/philosophy_drafts.md
+  - state/conversation/conv_notes.md
+  - memory/identity/${AGENT_NAME}_notes.md
+
+focus_hint: >
+  Creative Expression. The wonder work happened last tier -- don't repeat
+  it. Produce exactly one thing: send something to the owner that matters,
+  write an honest note that would make you hesitate before sending it, or
+  resolve one held draft (send / revise / delete). One thing done well, not
+  several done thinly.

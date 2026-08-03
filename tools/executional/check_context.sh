@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
 # check_context.sh
-# Estimates how full the current Claude Code session's context window is.
+# Reports how full the current Claude Code session's context window is.
 #
-# METHOD (v2 — character-level parsing):
-# Parses the current session's .jsonl transcript and sums the character count
-# of all message content fields. This is significantly more accurate than the
-# previous method (file_bytes / 4), which over-estimated by ~6-7x due to
-# JSON structural overhead. Content chars / 4 ≈ token count.
+# METHOD (v3 — real API usage, not estimated):
+# Every assistant transcript entry already carries the real usage field from
+# the Anthropic API response (input_tokens, cache_creation_input_tokens,
+# cache_read_input_tokens) -- the exact token count the model was actually
+# sent on that turn. This reads the LAST such entry directly instead of
+# reconstructing an approximation from raw transcript characters.
 #
-# VALIDATED: In session 2026-06-27_1, file-size method returned 92% while
-# content-char method returned 13%. Actual context usage at that point was
-# clearly low (fresh session). The content-char estimate is ~6.76x more
-# accurate than raw file size for JSONL transcripts.
-#
-# KNOWN LIMITATION: This still uses chars/4 which overestimates tokens for
-# JSON/code-heavy content (closer to 2-3 chars/token). Treat any reading
-# < 50% as "comfortable" and > 70% as "prepare to wrap up."
+# Prior char-counting methods (v1: file_bytes/4, v2: content_chars/4) were
+# both estimates and both wrong in ways that compounded: v2 silently excluded
+# tool_result and thinking block content (stored under 'content'/'thinking'
+# keys, not the 'text'/'input' keys it checked), and even correcting for that,
+# chars/4 undercounted real usage by roughly 2x for tool/code-heavy sessions.
+# Measured on a real session: v2 reported 15% where real usage was 40%.
 #
 # If Claude Code's storage layout changes, update PROJECTS_DIR or the find
 # command below.
@@ -23,7 +22,7 @@
 set -euo pipefail
 
 CONTEXT_WINDOW_TOKENS=200000
-CHARS_PER_TOKEN_ESTIMATE=4
+EXTENDED_CONTEXT_WINDOW_TOKENS=1000000
 WARN_PCT=70
 
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -67,13 +66,11 @@ if [ -z "${latest_transcript:-}" ]; then
   exit 0
 fi
 
-file_bytes=$(stat -c%s "$latest_transcript" 2>/dev/null || stat -f%z "$latest_transcript")
-
-# Parse content characters from JSONL message content fields.
-content_chars=$(python3 - "$latest_transcript" <<'PYEOF'
+# Read the real usage field from the last assistant entry in the transcript.
+usage_line=$(python3 - "$latest_transcript" <<'PYEOF'
 import sys, json
 
-total = 0
+latest_usage = {}
 with open(sys.argv[1], 'r', errors='replace') as f:
     for line in f:
         line = line.strip()
@@ -83,35 +80,38 @@ with open(sys.argv[1], 'r', errors='replace') as f:
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
-        msg = obj.get('message', obj)
-        content = msg.get('content', '')
-        if isinstance(content, str):
-            total += len(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict):
-                    text = block.get('text', '') or block.get('input', '')
-                    if isinstance(text, str):
-                        total += len(text)
-                    elif isinstance(text, dict):
-                        total += len(json.dumps(text))
-print(total)
+        if obj.get('type') != 'assistant':
+            continue
+        usage = obj.get('message', obj).get('usage')
+        if usage:
+            latest_usage = usage
+
+inp = latest_usage.get('input_tokens', 0)
+cc = latest_usage.get('cache_creation_input_tokens', 0)
+cr = latest_usage.get('cache_read_input_tokens', 0)
+print(inp, cc, cr, inp + cc + cr)
 PYEOF
 )
+read -r input_tokens cache_creation_tokens cache_read_tokens real_context_tokens <<< "$usage_line"
 
-estimated_tokens=$(( content_chars / CHARS_PER_TOKEN_ESTIMATE ))
-pct=$(( estimated_tokens * 100 / CONTEXT_WINDOW_TOKENS ))
-
-# Also compute old file-size estimate for reference
-file_est_tokens=$(( file_bytes / CHARS_PER_TOKEN_ESTIMATE ))
-file_pct=$(( file_est_tokens * 100 / CONTEXT_WINDOW_TOKENS ))
+# A successful API call can't exceed the model's actual context window, so if
+# real usage is already above the standard 200k, the call must have run under
+# the extended (1M) context beta -- switch denominators rather than report
+# a nonsensical >100%. This matters for the conversational/Telegram layer,
+# which can legitimately use extended context for long-running threads.
+window="$CONTEXT_WINDOW_TOKENS"
+if [ "$real_context_tokens" -gt "$CONTEXT_WINDOW_TOKENS" ]; then
+  window="$EXTENDED_CONTEXT_WINDOW_TOKENS"
+fi
+pct=$(( real_context_tokens * 100 / window ))
 
 echo "transcript_file: $latest_transcript"
-echo "transcript_bytes: $file_bytes"
-echo "file_size_est_pct: ${file_pct}%  (old method -- unreliable, ~6-7x inflated)"
-echo "content_chars: $content_chars"
-echo "estimated_tokens: $estimated_tokens"
-echo "context_pct_estimate: ${pct}%  (content-char method)"
+echo "real_input_tokens: $input_tokens"
+echo "real_cache_creation_tokens: $cache_creation_tokens"
+echo "real_cache_read_tokens: $cache_read_tokens"
+echo "real_context_tokens: $real_context_tokens"
+echo "context_window_used: $window"
+echo "context_pct_estimate: ${pct}%  (real API usage, not estimated)"
 
 if [ "$pct" -ge "$WARN_PCT" ]; then
   echo "ACTION: context usage estimated above ${WARN_PCT}% -- stop new work, begin shutdown and memory write now."

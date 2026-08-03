@@ -2,28 +2,58 @@
 """
 inbox.py — Unified inbox tool.
 
+Two tiers of entry, sorted by whether they need judgment:
+
+  Auto-tier (this tool fully handles and marks processed, no session needed):
+    context_update      -- append to memory/work/context_updates.md
+    agent_message        -- append to memory/work/agent_messages.md
+    schedule_directive    -- apply directly to config/session_schedule.json
+    verified_task         -- create a Loom task at status=ready (judgment
+                             already happened upstream of the inbox)
+
+  Judgment-tier (this tool validates and normalizes only -- it does NOT
+  create Loom tasks or take action. Entries stay processed=false. Planning
+  is the only thing that acts on these, deciding real goal/project
+  placement and status rather than a premature guess):
+    request              -- kind: task | bug | idea | sop | sop_change
+                             optional attached_file
+    comment               -- target_type: task | sop | goal, target_id
+
 Subcommands:
   startup [--dry-run] [--types TYPE1,TYPE2]
       Process unprocessed inbox/pending.json entries at session start.
-      Handles: task_request, verified_task, idea, agent_message, context_update,
-               file_delivery, task_comment, sop_comment, sop_change, sop_request,
-               schedule_directive.
+      Auto-tier entries are handled and marked processed. Judgment-tier
+      entries (request/comment) are left processed=false for planning.
 
   read [--summary] [--mark-read] [--prune]
       Read and inspect inbox entries.
         (no flag)     -- print unprocessed entries as JSON
         --summary     -- print human-readable summary
-        --mark-read   -- mark all unprocessed as processed after reading
+        --mark-read   -- mark all unprocessed as processed (blunt -- prefer
+                         `resolve --id` for judgment-tier entries you've
+                         actually acted on)
         --prune       -- remove processed entries older than 7 days
 
-  append --type TYPE --content TEXT [--from SENDER] [--source CHANNEL]
-      Append a new entry to inbox/pending.json.
-      Types: task_request | idea | agent_message | context_update | file_delivery
+  resolve --id ID [--id ID ...]
+      Mark specific entries processed by id. This is how planning closes
+      out a request/comment after creating the Loom task or deciding no
+      action is needed -- not a blanket mark-read.
+
+  append --type request --kind task|bug|idea|sop|sop_change --content TEXT
+         [--from SENDER] [--source CHANNEL] [--attach-file PATH]
+  append --type comment --target-type task|sop|goal --target-id ID
+         --content TEXT [--from SENDER] [--source CHANNEL]
+  append --type context_update|agent_message --content TEXT
+         [--from SENDER] [--source CHANNEL]
+      Append a new entry to inbox/pending.json. verified_task and
+      schedule_directive are not appended through this CLI -- they're
+      constructed directly by their producers (a verifier sub-agent, the
+      Nexus orchestrator) since both already carry a decided outcome.
 
   prune
       Remove processed entries older than 7 days (shortcut for read --prune).
 
-All subcommands exit 0 always. inbox processing failures are non-fatal.
+All subcommands exit 0 always. Inbox processing failures are non-fatal.
 """
 
 import argparse
@@ -38,9 +68,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 INBOX_FILE = PROJECT_DIR / "inbox" / "pending.json"
-LAIN_NOTES = PROJECT_DIR / "memory" / "work" / "lain_notes.md"
-AGENT_MESSAGES = PROJECT_DIR / "memory" / "work" / "agent_messages.md"
 CONTEXT_UPDATES = PROJECT_DIR / "memory" / "work" / "context_updates.md"
+AGENT_MESSAGES = PROJECT_DIR / "memory" / "work" / "agent_messages.md"
 LOOM_DB = Path.home() / ".local" / "share" / "loom" / "loom.db"
 LOOM_VENV_PYTHON = Path.home() / "lain" / "loom" / ".venv" / "bin" / "python"
 CHECKPOINT_FILE = PROJECT_DIR / "state" / "conversation" / "checkpoint.json"
@@ -54,7 +83,9 @@ SESSION_SCHEDULE_FILE = PROJECT_DIR / "config" / "session_schedule.json"
 MAINTENANCE_DECISIONS = PROJECT_DIR / "logs" / "maintenance_decisions.md"
 
 PRUNE_DAYS = 7
-VALID_TYPES = {"task_request", "idea", "agent_message", "context_update", "file_delivery"}
+VALID_TYPES = {"request", "comment", "context_update", "agent_message"}
+VALID_KINDS = {"task", "bug", "idea", "sop", "sop_change"}
+VALID_TARGET_TYPES = {"task", "sop", "goal"}
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +117,7 @@ def load_inbox() -> list:
 
 
 def save_inbox(entries: list) -> None:
+    INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = INBOX_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(entries, indent=2))
     tmp.rename(INBOX_FILE)
@@ -99,6 +131,10 @@ def append_to_file(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
         f.write(content)
+
+
+def new_id() -> str:
+    return uuid.uuid4().hex[:12]
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +208,7 @@ def extract_checkpoint_directives(dry_run: bool) -> list:
         return [f"[DRY RUN] checkpoint directive: {content[:80]}"]
 
     entry = {
+        "id": new_id(),
         "type": "context_update",
         "from": "owner_checkpoint",
         "content": content,
@@ -298,96 +335,56 @@ def handle_schedule_directive(entry: dict, dry_run: bool) -> str:
     return f"schedule_directive -> applied: {action} {detail}"
 
 
-def process_entry(entry: dict, dry_run: bool) -> str:
-    """Process a single inbox entry. Returns a one-line status string."""
+def process_entry(entry: dict, dry_run: bool) -> tuple:
+    """
+    Process a single inbox entry.
+    Returns (status_string, handled: bool). handled=False means the entry
+    is judgment-tier and must stay processed=false for planning to act on
+    later via `resolve --id`.
+    """
     etype = entry.get("type", "unknown")
     content = entry.get("content", "")
     from_ = entry.get("from", "unknown")
     ts = entry.get("timestamp", 0)
 
     if dry_run:
-        return f"[DRY RUN] would process {etype}: {content[:60]}"
+        return f"[DRY RUN] would process {etype}: {content[:60]}", True
 
-    if etype == "task_request":
-        ok = create_loom_task(content, from_)
-        status = "loom task created" if ok else "loom task FAILED"
-        return f"task_request -> {status}: {content[:60]}"
+    # --- Auto-tier: fully handled here, marked processed ---
 
-    elif etype == "verified_task":
-        ok = create_loom_task(content, from_, status="ready", tags="inbox,verified")
-        status = "loom task created (ready)" if ok else "loom task FAILED"
-        return f"verified_task -> {status}: {content[:60]}"
-
-    elif etype == "idea":
-        note = f"\n---\n[{ts_str(ts)}] from={from_}\n{content}\n"
-        append_to_file(LAIN_NOTES, note)
-        return f"idea -> appended to lain_notes.md: {content[:60]}"
+    if etype == "context_update":
+        note = f"\n[{ts_str(ts)}] from={from_}\n{content}\n"
+        append_to_file(CONTEXT_UPDATES, note)
+        return f"context_update -> applied: {content[:60]}", True
 
     elif etype == "agent_message":
         note = f"\n[{ts_str(ts)}] from={from_}\n{content}\n"
         append_to_file(AGENT_MESSAGES, note)
-        return f"agent_message -> logged: {content[:60]}"
-
-    elif etype == "context_update":
-        note = f"\n[{ts_str(ts)}] from={from_}\n{content}\n"
-        append_to_file(CONTEXT_UPDATES, note)
-        return f"context_update -> applied: {content[:60]}"
-
-    elif etype == "file_delivery":
-        file_path = entry.get("file_path", "unknown")
-        file_name = entry.get("file_name", "unknown")
-        task_desc = f"File from {from_}: {file_name} at {file_path} — {content}"
-        ok = create_loom_task(task_desc[:80], from_, status="triage", tags="inbox,file")
-        status = "loom task created" if ok else "loom task FAILED"
-        return f"file_delivery -> {status}: {file_name} ({content[:40]})"
-
-    elif etype == "task_comment":
-        task_id = entry.get("task_id")
-        text_content = entry.get("text") or content
-        if not task_id or not text_content:
-            return "task_comment -> skipped: missing task_id or text"
-        try:
-            import sqlite3 as _sqlite3
-            import datetime as _dt
-            conn = _sqlite3.connect(str(LOOM_DB))
-            now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            conn.execute(
-                "INSERT INTO task_events (task_id, event_type, new_value, changed_at) VALUES (?, 'comment', ?, ?)",
-                (task_id, text_content, now),
-            )
-            conn.commit()
-            conn.close()
-            return f"task_comment -> comment logged on T{task_id}: {text_content[:60]}"
-        except Exception as e:
-            return f"task_comment -> DB error ({e}): task={task_id}"
-
-    elif etype in ("sop_comment", "sop_change"):
-        sop_id = entry.get("sop_id", entry.get("path", "?"))
-        return f"{etype} -> acknowledged: sop={sop_id} from={from_}: {content[:60]}"
+        return f"agent_message -> logged: {content[:60]}", True
 
     elif etype == "schedule_directive":
-        return handle_schedule_directive(entry, dry_run)
+        return handle_schedule_directive(entry, dry_run), True
 
-    elif etype == "sop_request":
-        title = entry.get("title", "untitled SOP")
-        task_name = f"Write SOP: {title}"
-        ok = create_loom_task(task_name[:80], from_, status="scheduled", tags="sop")
-        if ok:
-            try:
-                import sqlite3 as _sqlite3
-                conn = _sqlite3.connect(str(LOOM_DB))
-                conn.execute(
-                    "UPDATE tasks SET goal_id=1 WHERE id=(SELECT MAX(id) FROM tasks WHERE tags='sop')"
-                )
-                conn.commit()
-                conn.close()
-            except Exception:
-                pass
-        status_str = "loom task created (scheduled, goal 1)" if ok else "loom task FAILED"
-        return f"sop_request -> {status_str}: {title[:60]}"
+    elif etype == "verified_task":
+        ok = create_loom_task(content, from_, status="ready", tags="inbox,verified")
+        status = "loom task created (ready)" if ok else "loom task FAILED"
+        return f"verified_task -> {status}: {content[:60]}", True
+
+    # --- Judgment-tier: left for planning, NOT marked processed ---
+
+    elif etype == "request":
+        kind = entry.get("kind", "task")
+        attached = entry.get("attached_file")
+        file_note = f" [file: {attached.get('file_name')}]" if attached else ""
+        return f"request (kind={kind}) -> left for planning{file_note}: {content[:60]}", False
+
+    elif etype == "comment":
+        target_type = entry.get("target_type", "?")
+        target_id = entry.get("target_id", "?")
+        return f"comment (target={target_type}:{target_id}) -> left for planning: {content[:60]}", False
 
     else:
-        return f"unknown type '{etype}' — skipped"
+        return f"unknown type '{etype}' — skipped (left unprocessed for inspection)", False
 
 
 def notify_queue_empty_if_needed() -> "str | None":
@@ -464,7 +461,7 @@ def main_startup() -> int:
         "--types",
         default=None,
         help="Comma-separated entry types to process (default: all). "
-             "Example: --types agent_message,context_update",
+             "Example: --types context_update,agent_message",
     )
     args = parser.parse_args()
 
@@ -491,18 +488,26 @@ def main_startup() -> int:
         return 0
 
     print(f"inbox: {len(unprocessed)} unprocessed entries — processing now")
+    handled_ids = set()
+    left_for_planning = 0
     for e in unprocessed:
-        print(f"  * {process_entry(e, args.dry_run)}")
+        status, handled = process_entry(e, args.dry_run)
+        print(f"  * {status}")
+        if handled and "id" in e:
+            handled_ids.add(e["id"])
+        elif not handled:
+            left_for_planning += 1
 
     if not args.dry_run:
         for e in entries:
-            if not e.get("processed", False) and (
-                allowed_types is None or e.get("type") in allowed_types
-            ):
+            if e.get("id") in handled_ids:
                 e["processed"] = True
         save_inbox(entries)
         suffix = f" (types: {args.types})" if allowed_types else ""
-        print(f"inbox: {len(unprocessed)} entries marked processed{suffix}")
+        print(f"inbox: {len(handled_ids)} auto-tier entries marked processed{suffix}")
+        if left_for_planning:
+            print(f"inbox: {left_for_planning} entries left processed=false for planning "
+                  f"(request/comment/unknown) — use `inbox.py resolve --id ID` once acted on")
 
         cutoff = time.time() - PRUNE_DAYS * 24 * 3600
         before = len(entries)
@@ -519,6 +524,32 @@ def main_startup() -> int:
 
 
 # ---------------------------------------------------------------------------
+# resolve — mark specific entries processed (planning's job, not a blanket sweep)
+# ---------------------------------------------------------------------------
+
+def main_resolve() -> int:
+    parser = argparse.ArgumentParser(description="Mark specific inbox entries processed by id")
+    parser.add_argument("--id", action="append", dest="ids", required=True,
+                        help="Entry id to mark processed. Repeat for multiple.")
+    args = parser.parse_args()
+
+    entries = load_inbox()
+    ids = set(args.ids)
+    found = set()
+    for e in entries:
+        if e.get("id") in ids:
+            e["processed"] = True
+            found.add(e["id"])
+
+    save_inbox(entries)
+    missing = ids - found
+    print(f"inbox: resolved {len(found)} entries")
+    if missing:
+        print(f"inbox: id(s) not found: {', '.join(sorted(missing))}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # read — inspect inbox entries
 # ---------------------------------------------------------------------------
 
@@ -528,7 +559,8 @@ def format_summary(entries: list) -> str:
     lines = [f"inbox: {len(entries)} unprocessed entries"]
     for i, e in enumerate(entries, 1):
         ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(e.get("timestamp", 0)))
-        lines.append(f"  [{i}] [{e.get('type','?')}] from={e.get('from','?')} at={ts}")
+        eid = e.get("id", "?")
+        lines.append(f"  [{i}] id={eid} [{e.get('type','?')}] from={e.get('from','?')} at={ts}")
         lines.append(f"      {e.get('content','')[:120]}")
     return "\n".join(lines)
 
@@ -553,7 +585,9 @@ def prune_inbox() -> str:
 
 def main_read() -> int:
     parser = argparse.ArgumentParser(description="Read inbox/pending.json")
-    parser.add_argument("--mark-read", action="store_true", help="Mark all entries as processed")
+    parser.add_argument("--mark-read", action="store_true",
+                        help="Mark ALL unprocessed entries as processed (blunt -- prefer "
+                             "`resolve --id` for entries you've individually acted on)")
     parser.add_argument("--summary", action="store_true", help="Print human-readable summary")
     parser.add_argument("--prune", action="store_true",
                         help=f"Remove processed entries older than {PRUNE_DAYS} days")
@@ -591,9 +625,25 @@ def main_append() -> int:
     parser.add_argument("--from", dest="from_", default="andrii", help="Source agent/user")
     parser.add_argument("--source", default="telegram",
                         help="Channel (telegram, nexus, internal)")
+    parser.add_argument("--kind", choices=sorted(VALID_KINDS),
+                        help="Required for --type request")
+    parser.add_argument("--attach-file", dest="attach_file", default=None,
+                        help="Optional file path for --type request")
+    parser.add_argument("--target-type", dest="target_type", choices=sorted(VALID_TARGET_TYPES),
+                        help="Required for --type comment")
+    parser.add_argument("--target-id", dest="target_id", default=None,
+                        help="Required for --type comment")
     args = parser.parse_args()
 
+    if args.type == "request" and not args.kind:
+        print("ERROR: --type request requires --kind", file=sys.stderr)
+        return 1
+    if args.type == "comment" and (not args.target_type or not args.target_id):
+        print("ERROR: --type comment requires --target-type and --target-id", file=sys.stderr)
+        return 1
+
     entry = {
+        "id": new_id(),
         "source": args.source,
         "from": args.from_,
         "content": args.content,
@@ -601,10 +651,16 @@ def main_append() -> int:
         "type": args.type,
         "processed": False,
     }
+    if args.type == "request":
+        entry["kind"] = args.kind
+        if args.attach_file:
+            entry["attached_file"] = {"file_path": args.attach_file}
+    if args.type == "comment":
+        entry["target_type"] = args.target_type
+        entry["target_id"] = args.target_id
 
     entries = load_inbox()
     entries.append(entry)
-    INBOX_FILE.parent.mkdir(parents=True, exist_ok=True)
     save_inbox(entries)
 
     print(json.dumps(entry))
@@ -626,7 +682,7 @@ def main_prune() -> int:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: inbox.py <startup|read|append|prune> [args]", file=sys.stderr)
+        print("Usage: inbox.py <startup|read|append|resolve|prune> [args]", file=sys.stderr)
         sys.exit(1)
     cmd = sys.argv.pop(1)
     if cmd == "startup":
@@ -635,9 +691,11 @@ if __name__ == "__main__":
         sys.exit(main_read())
     elif cmd == "append":
         sys.exit(main_append())
+    elif cmd == "resolve":
+        sys.exit(main_resolve())
     elif cmd == "prune":
         sys.exit(main_prune())
     else:
         print(f"Unknown subcommand: {cmd}", file=sys.stderr)
-        print("Usage: inbox.py <startup|read|append|prune> [args]", file=sys.stderr)
+        print("Usage: inbox.py <startup|read|append|resolve|prune> [args]", file=sys.stderr)
         sys.exit(1)

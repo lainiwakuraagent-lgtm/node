@@ -9,15 +9,24 @@ You are not here to plan, reflect, or reconsider the direction. That work is don
 Your job this session is to move the queue forward — complete tasks, ship artifacts,
 write outputs that exist after you are gone.
 
+Inbox intake is planning's job now, not yours — if `inbox/pending.json` has
+unprocessed entries, that's a planning-session concern (sweeping them into
+real Loom structure), not something to convert inline here. (The dispatcher
+itself hasn't been updated to match this yet — it may still hand you an
+execution session because inbox had pending work. If that happens, leave
+the inbox alone and work the Loom queue as below; note the mismatch in your
+handoff rather than processing inbox items yourself.)
+
 ## How to proceed
 
-0. **Check inbox first** (step 4 in orientation does this, but confirm):
-   If `inbox/pending.json` has unprocessed `task_request` or `bug_report` entries,
-   run `python3 tools/inbox.py startup` to convert them to Loom tasks before
-   reading the Loom queue. The session type was forced to execution because inbox
-   had pending work — process it before diving into Loom.
-1. Read `state/loom_context.json` to find the current task.
-2. Read `memory/progress.md` for the next action if loom_context doesn't clarify it.
+1. Read `state/loom_context.json` to find the current task. If it's unclear,
+   check the task's own goal/project folder (`memory/work/goal_<id>/` or
+   `memory/work/project_<id>/`) for design docs the task description points at.
+2. Resolve the task's SOP: for every tag on the task, run
+   `scripts/executional/tag_skill_lookup.py --project-dir . --tag <tag>`. Read every
+   skill file that resolves — its procedure is mandatory for this task, not optional
+   reading. If a tag has no match, see `prompts/reference/tools/loom.md`'s "When to
+   propose a new SOP" — don't just proceed as if no procedure applied.
 3. Work the task completely — don't stop halfway because it's getting complex.
 4. After each completed task: re-check time and context before continuing.
 5. If both are within bounds AND you have completed fewer than `EXECUTION_TASK_CAP` tasks
@@ -64,7 +73,7 @@ For real blockers: note them in `memory/work/pending_decisions.md` and move to t
 
 ## Discipline
 
-- Philosophy tangents: not now. Note them in `memory/work/${AGENT_NAME}_notes.md` and return.
+- Philosophy tangents: not now. Note them in `memory/identity/${AGENT_NAME}_notes.md` and return.
 - Refactoring nearby code that isn't part of the task: not now.
 - "Improvements" beyond scope: not now.
 

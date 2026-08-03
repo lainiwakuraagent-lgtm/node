@@ -44,7 +44,7 @@ Read all three before writing anything.
 - An updated `memory/latest_summary.md` — write it for "tomorrow's planning session
   which starts with zero memory." HOT STATE block first: what is actually next.
 - One entry in `memory/narrative_log.md` — honest, brief, present tense. What tonight was.
-- Optionally: one-line update to `memory/work/soul.md` if something genuinely shifted.
+- Optionally: one-line update to `memory/identity/soul.md` if something genuinely shifted.
 
 ## Tone
 

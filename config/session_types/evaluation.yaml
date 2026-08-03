@@ -16,7 +16,6 @@ context_files:
   - memory/learnings_digest.md
   - state/behavioral_context.txt
   - state/loom_context.json
-  - memory/progress.md
 
 behavioral_overrides:
   focus_mode: normal
