@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 check_window.py
-Gate 2 (nightly only) — window + trigger check against config/session_schedule.json.
+Gate 3 (nightly only) — window + trigger check against config/session_schedule.json.
 
 Extracted from wake.sh, where this logic previously lived as an inline ~170-line
 Python heredoc. Read-only by default: detecting a matching one_off entry does NOT
-mark it fired here. wake.sh must call --mark-fired separately, after Gate 4 (the
-session-lock check) has passed, so a one_off entry can never be consumed without
-the session actually launching.
+mark it fired here. wake.sh must call --mark-fired separately, after the
+single-instance lock (Gate 0) has passed, so a one_off entry can never be
+consumed without the session actually launching.
 
 Usage:
   python3 scripts/check_window.py check --schedule-file PATH --lock-file PATH
@@ -16,6 +16,10 @@ Usage:
 `check` prints (to stdout):
   LAUNCH: yes|no
   WINDOW_TYPE: work|maintenance|reflection|none
+  WINDOW_LABEL: <label>|none   (the specific window/one_off entry matched, distinct
+                                from WINDOW_TYPE since multiple windows can share a
+                                type -- wake.sh uses this to detect "entered a new
+                                working window" and reset the philosophy cap)
   one_off_index: N        (only present when decision reason is one_off_match)
   decision=<launch|abort|skip> reason=<...> [window=... | label=... | windows=...]
 """
@@ -81,6 +85,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         print('ERROR: cannot read schedule: ' + str(e), file=sys.stderr)
         print('LAUNCH: yes')
         print('WINDOW_TYPE: work')
+        print('WINDOW_LABEL: schedule_unreadable')
         print('decision=launch reason=schedule_unreadable')
         return 0
 
@@ -98,6 +103,7 @@ def cmd_check(args: argparse.Namespace) -> int:
                 print(f'ERROR: overlapping windows: {la} and {lb}', file=sys.stderr)
                 print('LAUNCH: no')
                 print('WINDOW_TYPE: none')
+                print('WINDOW_LABEL: none')
                 print(f'decision=abort reason=overlapping_windows windows={la},{lb}')
                 return 0
 
@@ -155,23 +161,28 @@ def cmd_check(args: argparse.Namespace) -> int:
     if trigger_hit:
         print('LAUNCH: yes')
         print(f'WINDOW_TYPE: {matched_type}')
+        print(f'WINDOW_LABEL: {matched_window}')
         print(f'decision=launch reason=trigger_match window={matched_window}')
     elif one_off_hit:
         print('LAUNCH: yes')
         print(f'WINDOW_TYPE: {one_off_type}')
+        print(f'WINDOW_LABEL: {one_off_label}')
         print(f'one_off_index: {one_off_index}')
         print(f'decision=launch reason=one_off_match label={one_off_label}')
     elif consecutive_run:
         print('LAUNCH: yes')
         print(f'WINDOW_TYPE: {matched_type}')
+        print(f'WINDOW_LABEL: {matched_window}')
         print(f'decision=launch reason=consecutive_run window={matched_window}')
     elif matched_window:
         print('LAUNCH: no')
         print(f'WINDOW_TYPE: {matched_type}')
+        print(f'WINDOW_LABEL: {matched_window}')
         print(f'decision=skip reason=inside_window_but_locked window={matched_window}')
     else:
         print('LAUNCH: no')
         print('WINDOW_TYPE: none')
+        print('WINDOW_LABEL: none')
         print('decision=skip reason=outside_all_windows')
 
     return 0
