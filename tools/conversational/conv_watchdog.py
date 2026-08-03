@@ -40,6 +40,7 @@ WAKE_LOG = LOG_DIR / "wake.log"
 
 STALE_THRESHOLD_MINUTES = 15
 SERVICE_NAME = f"conversation@{PROJECT_DIR.name}.service"
+PROCCTL = PROJECT_DIR / "tools" / "executional" / "procctl.sh"
 
 
 def ts() -> str:
@@ -60,7 +61,7 @@ def service_is_active() -> bool:
     try:
         env = {**os.environ, "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}"}
         result = subprocess.run(
-            ["systemctl", "--user", "is-active", SERVICE_NAME],
+            [str(PROCCTL), "is-active", SERVICE_NAME],
             capture_output=True, text=True, env=env, timeout=10,
         )
         return result.stdout.strip() == "active"
@@ -77,7 +78,7 @@ def restart_service(dry_run: bool) -> None:
     log(f"Restarting {SERVICE_NAME} ...")
     try:
         subprocess.run(
-            ["systemctl", "--user", "restart", SERVICE_NAME],
+            [str(PROCCTL), "restart", SERVICE_NAME],
             env=env, timeout=30, check=True,
         )
         log(f"Restart issued for {SERVICE_NAME}.")

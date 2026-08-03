@@ -45,6 +45,7 @@ TOKEN_FILE = PROJECT_DIR / "state" / "nexus_lain_token.txt"
 WAKE_LOG = PROJECT_DIR / "logs" / "wake.log"
 PASS_FILE = PROJECT_DIR / "identity" / "nexus_seed_passwords.txt"
 CHANNELS_DIR = PROJECT_DIR / "state" / "agent_channels"
+PROCCTL = PROJECT_DIR / "tools" / "executional" / "procctl.sh"
 
 NEXUS_URL = os.environ.get("NEXUS_URL", "http://100.110.36.84:8900")
 NEXUS_USERNAME = os.environ.get("NEXUS_USERNAME", "lain")
@@ -206,7 +207,7 @@ def is_channel_session_active(channel_id: str) -> bool:
     try:
         env = {**os.environ, "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}"}
         result = subprocess.run(
-            ["systemctl", "--user", "is-active", f"agent-channel@{channel_id}.service"],
+            [str(PROCCTL), "is-active", f"agent-channel@{channel_id}.service"],
             capture_output=True, text=True, env=env, timeout=5,
         )
         return result.stdout.strip() == "active"
@@ -240,7 +241,7 @@ def spawn_channel_session(channel_id: str, peer_id: str, dry_run: bool = False) 
     try:
         env = {**os.environ, "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}"}
         subprocess.run(
-            ["systemctl", "--user", "start", f"agent-channel@{channel_id}.service"],
+            [str(PROCCTL), "start", f"agent-channel@{channel_id}.service"],
             env=env, timeout=15, check=True,
         )
         log(f"started agent-channel@{channel_id}.service (peer={peer_id})")

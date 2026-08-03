@@ -34,6 +34,7 @@ WAKE_LOG = LOG_DIR / "wake.log"
 
 DEFAULT_THRESHOLD_MINUTES = int(os.environ.get("CHANNEL_MAX_DURATION_MINUTES", "20"))
 _UNIT_RE = re.compile(r"^agent-channel@(.+)\.service$")
+PROCCTL = PROJECT_DIR / "tools" / "executional" / "procctl.sh"
 
 
 def ts() -> str:
@@ -55,7 +56,7 @@ def get_active_channel_units() -> list[str]:
     try:
         env = {**os.environ, "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}"}
         result = subprocess.run(
-            ["systemctl", "--user", "list-units", "agent-channel@*.service",
+            [str(PROCCTL), "list-units", "agent-channel@*.service",
              "--state=active", "--output=json", "--no-pager"],
             capture_output=True, text=True, env=env, timeout=10,
         )
@@ -81,7 +82,7 @@ def get_session_age_minutes(channel_id: str) -> float | None:
 
 
 def force_close_channel(channel_id: str, dry_run: bool) -> None:
-    """Write force_close exit reason and stop the service via systemctl."""
+    """Write force_close exit reason and stop the service via procctl."""
     exit_reason_file = CHANNELS_DIR / channel_id / "exit_reason.txt"
     unit = f"agent-channel@{channel_id}.service"
     env = {**os.environ, "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}"}
@@ -101,10 +102,10 @@ def force_close_channel(channel_id: str, dry_run: bool) -> None:
     except OSError as e:
         log(f"WARN: could not write exit reason for {channel_id}: {e}")
 
-    # systemctl stop (not kill) so Restart=on-failure does not trigger.
+    # procctl stop (not kill) so Restart=on-failure does not trigger.
     try:
         subprocess.run(
-            ["systemctl", "--user", "stop", unit],
+            [str(PROCCTL), "stop", unit],
             env=env, timeout=30, check=True,
         )
         log(f"Stopped {unit}.")

@@ -17,6 +17,8 @@ prompts/persona.txt
 state/consecutive_philosophy.count
 state/current_session_key.txt
 state/maintenance_scope_idx.txt
+state/last_window_label.txt
+state/.no_lock_check
 
 # Secrets
 identity/nexus_password.txt

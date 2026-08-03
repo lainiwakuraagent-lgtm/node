@@ -25,6 +25,7 @@ WAKE_LOG = LOG_DIR / "wake.log"
 LAST_REAL_MSG_FILE = CONV_DIR / "last_real_message_at.txt"
 RESET_SIGNAL_FILE = CONV_DIR / "reset_signal.txt"
 SERVICE_NAME = f"conversation@{PROJECT_DIR.name}.service"
+PROCCTL = PROJECT_DIR / "tools" / "executional" / "procctl.sh"
 
 IDLE_THRESHOLD_SECONDS = 1800  # 30 minutes
 
@@ -47,7 +48,7 @@ def service_is_active() -> bool:
     try:
         env = {**os.environ, "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}"}
         result = subprocess.run(
-            ["systemctl", "--user", "is-active", SERVICE_NAME],
+            [str(PROCCTL), "is-active", SERVICE_NAME],
             capture_output=True, text=True, env=env, timeout=10,
         )
         return result.stdout.strip() == "active"

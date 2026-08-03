@@ -229,10 +229,10 @@ _uid="$(id -u)"
 export XDG_RUNTIME_DIR="/run/user/${_uid}"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${_uid}/bus"
 
-if systemctl --user is-active telegram-webhook.service >/dev/null 2>&1; then
+if bash "${PROJECT_DIR}/tools/executional/procctl.sh" is-active telegram-webhook.service >/dev/null 2>&1; then
   ok "telegram-webhook.service is running"
 else
-  warn "telegram-webhook.service not running — start: systemctl --user start telegram-webhook.service"
+  warn "telegram-webhook.service not running — start: bash tools/executional/procctl.sh start telegram-webhook.service"
 fi
 
 if curl -sf http://localhost:8765/health >/dev/null 2>&1; then

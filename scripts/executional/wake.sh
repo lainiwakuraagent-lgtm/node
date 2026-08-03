@@ -173,6 +173,17 @@ current_count=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
 # which is mode-agnostic and Loom-aware, and runs every wake regardless of
 # TRIGGER_MODE — the modest per-wake cost of always invoking it (a few sqlite
 # queries) is a better trade than a second, drifting reimplementation in bash.
+#
+# Full list of what resets consecutive_philosophy.count / philosophy_cap.active:
+#   1. New calendar night (immediately below) — the hard, guaranteed reset.
+#   2. New working window within the same night/day (Gate 3, below) — a cap
+#      hit in one scheduled window must not bleed into and block a later,
+#      unrelated window.
+#   3. A non-philosophy session actually runs (end of this script) — the
+#      normal case once real queue/inbox work appears.
+#   4. Staleness check in resolve_session_type.py's Priority 2.5 — clears an
+#      already-active cap early if something genuinely new landed in Loom or
+#      the inbox after the cap was set.
 
 # --- Gate 1: subscription usage limits (nightly + emergency) ---
 # manual is a deliberate break-glass override: it exists for exactly the case
@@ -226,28 +237,56 @@ if [ "$TRIGGER_MODE" = "nightly" ]; then
     --schedule-file "$SCHEDULE_FILE" 2>&1) || true
   log_line "khal schedule sync: $khal_sync_result"
 
-  # --lock-file /dev/null: check_window.py's own "someone else already
-  # running" signal (used for its consecutive_run catch-up-poll logic) would
-  # otherwise read $STATE_DIR/session.lock -- but by this point Gate 0 has
-  # already atomically acquired that same lock for us, so it always exists
-  # from here on and would misreport "someone else is running" against
-  # ourselves. Double-launch is already structurally impossible (Gate 0
-  # would have exited before reaching here), so this check is redundant --
-  # /dev/null (never exists) restores the original catch-up-poll behavior.
+  # check_window.py's own "someone else already running" signal (used for
+  # its consecutive_run catch-up-poll logic) would otherwise read
+  # $STATE_DIR/session.lock -- but by this point Gate 0 has already
+  # atomically acquired that same lock for us, so it always exists from here
+  # on and would misreport "someone else is running" against ourselves.
+  # Double-launch is already structurally impossible (Gate 0 would have
+  # exited before reaching here), so this check is redundant -- pass a path
+  # guaranteed to never exist so it always reads "nobody else is running"
+  # and the original catch-up-poll behavior is preserved. NOTE: /dev/null is
+  # NOT such a path -- it's a real device node, os.path.exists('/dev/null')
+  # is True, and that silently broke this exact check before this fix.
   window_result=$(python3 "$PROJECT_DIR/scripts/executional/check_window.py" check \
-    --schedule-file "$SCHEDULE_FILE" --lock-file /dev/null 2>&1)
+    --schedule-file "$SCHEDULE_FILE" --lock-file "$STATE_DIR/.no_lock_check" 2>&1)
 
   log_line "Window check result: $window_result"
 
   window_launch=$(echo "$window_result" | grep '^LAUNCH:' | head -1 | awk '{print $2}')
   WINDOW_TYPE=$(echo "$window_result" | grep '^WINDOW_TYPE:' | head -1 | awk '{print $2}')
+  WINDOW_LABEL=$(echo "$window_result" | grep '^WINDOW_LABEL:' | head -1 | awk '{print $2}')
   ONE_OFF_INDEX=$(echo "$window_result" | grep '^one_off_index:' | head -1 | awk '{print $2}' || true)
   export WINDOW_TYPE
-  log_line "Window type: $WINDOW_TYPE"
+  log_line "Window type: $WINDOW_TYPE (label: ${WINDOW_LABEL:-none})"
 
   if [ "$window_launch" != "yes" ]; then
     log_line "ABORT: window gate denied launch. $window_result"
     exit 0
+  fi
+
+  # --- Reset philosophy cap/count on entering a new working window ---
+  # The night-boundary reset above only fires once per calendar night, but a
+  # single night (or a khal-synced daytime schedule) can contain several
+  # distinct windows -- e.g. a 10:00-12:00 block and an unrelated 14:00-15:00
+  # block. Hitting the cap in the first must not carry over and block the
+  # second: each window is a fresh opportunity to work the queue/inbox.
+  # Keyed on WINDOW_LABEL (not WINDOW_TYPE, which multiple windows can
+  # share) so this only fires on a genuine window change, not on repeated
+  # catch-up polls inside the same window. Two same-day windows sharing an
+  # identical label (e.g. a recurring khal event with the same title) won't
+  # be told apart -- session_schedule.json's windows[] already requires
+  # unique labels, so this only matters for one_off entries.
+  if [ -n "${WINDOW_LABEL:-}" ] && [ "$WINDOW_LABEL" != "none" ]; then
+    LAST_WINDOW_FILE="$STATE_DIR/last_window_label.txt"
+    last_window_label=""
+    [ -f "$LAST_WINDOW_FILE" ] && last_window_label=$(cat "$LAST_WINDOW_FILE")
+    if [ "$last_window_label" != "$WINDOW_LABEL" ]; then
+      log_line "New working window entered ($WINDOW_LABEL, was: ${last_window_label:-none}). Resetting philosophy cap/count."
+      echo "0" > "$STATE_DIR/consecutive_philosophy.count"
+      rm -f "$STATE_DIR/philosophy_cap.active" "$STATE_DIR/philosophy_cap_notified_at.txt"
+      echo "$WINDOW_LABEL" > "$LAST_WINDOW_FILE"
+    fi
   fi
 else
   log_line "Gate 3 (window check) skipped — TRIGGER_MODE=$TRIGGER_MODE."
@@ -265,7 +304,7 @@ if [ "$TRIGGER_MODE" != "nightly" ] && [ -z "$ONE_OFF_INDEX" ]; then
   _schedule_file="$PROJECT_DIR/config/session_schedule.json"
   if [ -f "$_schedule_file" ]; then
     _check_out=$(python3 "$PROJECT_DIR/scripts/executional/check_window.py" check \
-      --schedule-file "$_schedule_file" --lock-file /dev/null 2>/dev/null || true)
+      --schedule-file "$_schedule_file" --lock-file "$STATE_DIR/.no_lock_check" 2>/dev/null || true)
     ONE_OFF_INDEX=$(echo "$_check_out" | grep '^one_off_index:' | head -1 | awk '{print $2}' || true)
     SCHEDULE_FILE="$_schedule_file"
     if [ -n "$ONE_OFF_INDEX" ]; then
