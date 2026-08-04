@@ -149,7 +149,6 @@ def detect_entry_points(project_dir):
         ("scripts/conversational/conversation.sh", "conversational layer"),
         ("scripts/orchestrator.py", "task orchestrator"),
         ("tools/executional/session_trigger_server.py", "manual trigger server"),
-        ("tools/conversational/telegram_webhook_handler.py", "Telegram webhook handler"),
         ("src/main.py", "main entry point"),
         ("main.py", "main entry point"),
         ("app.py", "application entry point"),

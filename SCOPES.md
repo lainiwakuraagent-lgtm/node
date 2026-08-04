@@ -42,10 +42,7 @@ tools/
   conversational/       # owned by / called from the conversational layer
     telegram_send.sh      # send Telegram message to owner
     telegram_watcher.py   # long-poll Telegram watcher -- the active message path
-    telegram_webhook_handler.py  # DEAD: pre-long-poll webhook receiver, superseded
-    telegram_check.sh     # DEAD: pre-long-poll getUpdates fallback, superseded
     command_dispatcher.py # /command handler
-    check_replies.sh      # DEAD: session-start reply check, superseded by telegram_watcher.py
     check_conv_status.sh  # conversation layer health check
     update_conv_budget.py # context budget counters
     conv_watchdog.py               # crash/hang detector -- restarts the service if dead or stuck
