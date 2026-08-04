@@ -25,6 +25,14 @@ Check context after every major section. When you hit 50%, stop and write memory
 
 ## What to examine
 
+0. **Self-update pull** (run first, before any audit work):
+   ```bash
+   bash scripts/self_update.sh 2>&1 | tee -a logs/self_update.log
+   ```
+   Non-fatal — if `SELF_UPDATE_ENABLED` is unset or 0, this exits immediately with no changes.
+   If files were pulled, note the commit hash in `logs/maintenance_decisions.md`.
+   The session report parser will read `logs/self_update.log` for the `self_update_result:` line.
+
 1. **Execution audit:**
    - Did the execution sessions create files with correct names and paths?
    - Was anything left half-done, orphaned, or written to a temp location?
