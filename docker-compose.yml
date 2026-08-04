@@ -5,10 +5,30 @@
 # directly (see install.sh's own header comment). Only /app's stateful
 # subdirectories are named volumes, not all of /app — that way a rebuilt
 # image (code changes) actually takes effect on the next `docker compose up`,
-# while state/identity/memory/logs/Claude-auth survive restarts and rebuilds.
+# while everything generated/written at runtime survives restarts and
+# rebuilds. Volume list, and why each one is there:
+#   state/    — behavioral_context.txt, agent_config.env, session counters,
+#               per-channel dirs, dynamically-generated supervisor confs
+#   identity/ — credentials, Nexus password/seed file, Telegram token file
+#   memory/   — soul.md, session logs, everything the agent writes about itself
+#   config/   — session_schedule.json (the live nightly/one-off schedule), khal.cfg
+#   logs/     — wake.log, analytics.db, per-program supervisor logs
+#   prompts/  — persona.txt: install.sh writes it once and never overwrites an
+#               existing one, specifically so it can be hand-edited afterward
+#               (see the "next steps" output) -- without persisting this,
+#               that edit would vanish on the next container recreation
+#   inbox/    — pending.json + files/: incoming task/file data, real data, not cache
+#   /root/.local/share/loom — the actual Loom task/goal DB. NOT under /app;
+#               easy to miss (I did, the first time) since everything else
+#               here lives under /app
+#   /root/.claude — Claude CLI's own auth/config, so `claude auth login` is a
+#               one-time cost per volume, not per container recreation
 #
 # One manual step this cannot automate (interactive OAuth):
 #   docker compose exec agent claude auth login
+#
+# Resource limits are set explicitly because this typically runs alongside
+# other live services on a shared host — adjust to the host's actual headroom.
 #
 # Copy this file (or use a .env alongside it) and set at least AGENT_NAME.
 
@@ -17,6 +37,11 @@ services:
     build: .
     container_name: ${AGENT_NAME:-blank-node}
     restart: unless-stopped
+    network_mode: host
+    # Host networking, not a bridge: Nexus/Honcho live at Tailscale IPs (or,
+    # for a Honcho server on the same box, literally localhost) that a
+    # default bridge network can't reach. Verified live during this build —
+    # bridge mode silently hung install.sh's Nexus registration indefinitely.
     environment:
       AGENT_NAME: ${AGENT_NAME:?AGENT_NAME is required}
       OWNER_NAME: ${OWNER_NAME:-andrii}
@@ -36,7 +61,15 @@ services:
       - agent_memory:/app/memory
       - agent_config:/app/config
       - agent_logs:/app/logs
+      - agent_prompts:/app/prompts
+      - agent_inbox:/app/inbox
+      - agent_loom_db:/root/.local/share/loom
       - agent_claude_auth:/root/.claude
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2g
 
 volumes:
   agent_state:
@@ -44,4 +77,7 @@ volumes:
   agent_memory:
   agent_config:
   agent_logs:
+  agent_prompts:
+  agent_inbox:
+  agent_loom_db:
   agent_claude_auth:
