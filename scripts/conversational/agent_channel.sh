@@ -20,7 +20,7 @@ LOG_DIR="$PROJECT_DIR/logs"
 CHANNELS_DIR="$STATE_DIR/agent_channels"
 CHANNEL_DIR="$CHANNELS_DIR/$CHANNEL_ID"
 PROMPT_FILE="$PROJECT_DIR/prompts/agent_channel.md"
-PERSONA_FILE="$PROJECT_DIR/prompts/persona.txt"
+SOUL_FILE="$PROJECT_DIR/memory/work/soul.md"
 LOCK_FILE="$CHANNEL_DIR/session.lock"
 WATCHER_PID_FILE="$CHANNEL_DIR/watcher.pid"
 
@@ -126,26 +126,19 @@ while true; do
     SESSION_OUT="$LOG_DIR/channel_${CHANNEL_ID}_$(date +%Y-%m-%d)_${RESTART_COUNT}.out"
     SESSION_ERR="$LOG_DIR/channel_${CHANNEL_ID}_$(date +%Y-%m-%d)_${RESTART_COUNT}.err"
 
-    # Build prompt: agent_channel.md + comms orientation + optional persona, substituting tokens
+    # Build prompt: agent_channel.md + soul.md (identity/persona), substituting tokens
     SESSION_PROMPT=$(mktemp "$STATE_DIR/channel_prompt.XXXXXX.md")
-    ORIENTATION_FILE="$PROJECT_DIR/prompts/comms_orientation.md"
     {
         sed \
             -e "s/\${AGENT_NAME}/${AGENT_NAME}/g" \
             -e "s/\${OWNER_NAME}/${OWNER_NAME}/g" \
             -e "s/\${CHANNEL_ID}/${CHANNEL_ID}/g" \
             "$PROMPT_FILE"
-        if [ -f "$ORIENTATION_FILE" ]; then
+        if [ -f "$SOUL_FILE" ]; then
             echo ""
             echo "---"
             echo ""
-            cat "$ORIENTATION_FILE"
-        fi
-        if [ -f "$PERSONA_FILE" ]; then
-            echo ""
-            echo "---"
-            echo ""
-            cat "$PERSONA_FILE"
+            cat "$SOUL_FILE"
         fi
     } > "$SESSION_PROMPT"
 

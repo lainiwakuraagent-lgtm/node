@@ -18,7 +18,7 @@ LOG_DIR="$PROJECT_DIR/logs"
 ENV_FILE="$HOME/.claude/.env"
 CONV_DIR="$STATE_DIR/conversation"
 PROMPT_FILE="$PROJECT_DIR/prompts/conversation.md"
-PERSONA_FILE="$PROJECT_DIR/prompts/persona.txt"
+SOUL_FILE="$PROJECT_DIR/memory/work/soul.md"
 LOCK_FILE="$STATE_DIR/conversation.lock"
 WATCHER_PID_FILE="$CONV_DIR/watcher.pid"
 
@@ -196,26 +196,19 @@ while true; do
     SESSION_OUT="$LOG_DIR/conversation_$(date +%Y-%m-%d)_${RESTART_COUNT}.out"
     SESSION_ERR="$LOG_DIR/conversation_$(date +%Y-%m-%d)_${RESTART_COUNT}.err"
 
-    # Build prompt: conversation.md + optional persona.
+    # Build prompt: conversation.md + soul.md (identity/persona).
     # conversation.md uses ${AGENT_NAME}/${OWNER_NAME} tokens for identity paths
     # (same convention resolve_session_type.py substitutes for other session
     # types) -- substitute them here since this path never goes through that
     # resolver.
     SESSION_PROMPT=$(mktemp "$STATE_DIR/conv_prompt.XXXXXX.md")
-    ORIENTATION_FILE="$PROJECT_DIR/prompts/comms_orientation.md"
     {
         sed -e "s/\${AGENT_NAME}/${AGENT_NAME}/g" -e "s/\${OWNER_NAME}/${OWNER_NAME}/g" "$PROMPT_FILE"
-        if [ -f "$ORIENTATION_FILE" ]; then
+        if [ -f "$SOUL_FILE" ]; then
             echo ""
             echo "---"
             echo ""
-            cat "$ORIENTATION_FILE"
-        fi
-        if [ -f "$PERSONA_FILE" ]; then
-            echo ""
-            echo "---"
-            echo ""
-            cat "$PERSONA_FILE"
+            cat "$SOUL_FILE"
         fi
     } > "$SESSION_PROMPT"
 
@@ -251,6 +244,15 @@ while true; do
     /usr/bin/python3 "$PROJECT_DIR/tools/conversational/conversational_analytics_write.py" \
         --channel telegram \
         --exit-reason "$EXIT_REASON" \
+        2>/dev/null || true
+
+    # Push this session's new thread.json entries into Honcho (no-ops if
+    # HONCHO_URL isn't configured; incremental via honcho_last_synced.json).
+    /usr/bin/python3 "$PROJECT_DIR/tools/conversational/honcho_client.py" \
+        --sync-thread "$OWNER_NAME" \
+        --session-id "$(date +%Y-%m-%d)_conv_${RESTART_COUNT}" \
+        --thread-file "$CONV_DIR/thread.json" \
+        --marker-file "$CONV_DIR/honcho_last_synced.json" \
         2>/dev/null || true
 
     if [ "$EXIT_REASON" = "idle_close" ]; then

@@ -229,9 +229,9 @@ def _load_honcho_context(peer_id: str) -> str:
     """
     try:
         import sys as _sys
-        _tools_dir = str(Path(__file__).parent)
-        if _tools_dir not in _sys.path:
-            _sys.path.insert(0, _tools_dir)
+        _conv_tools_dir = str(Path(__file__).parent.parent / "conversational")
+        if _conv_tools_dir not in _sys.path:
+            _sys.path.insert(0, _conv_tools_dir)
         from honcho_client import honcho_read_context  # type: ignore
         return honcho_read_context(peer_id)
     except Exception:

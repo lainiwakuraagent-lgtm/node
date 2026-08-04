@@ -787,7 +787,7 @@ else
     fi
     ok "Honcho configured: ${_honcho_url} (workspace: ${_honcho_workspace})"
     info "Test connectivity after install:"
-    info "  /usr/bin/python3 ${INSTALL_ROOT}/tools/executional/honcho_client.py --test-read <peer>"
+    info "  /usr/bin/python3 ${INSTALL_ROOT}/tools/conversational/honcho_client.py --test-read <peer>"
   elif [ -z "$_honcho_url" ] && [ "$DRY_RUN" = "0" ]; then
     info "Skipped — no Honcho URL provided. Configure later:"
     info "  echo 'HONCHO_URL=http://...' >> state/agent_config.env"
