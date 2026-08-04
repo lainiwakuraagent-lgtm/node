@@ -15,7 +15,7 @@ A **node** is a single autonomous agent instance. It contains:
 - **Systemd units** — night timer + emergency timer, user-level (no root needed), instance-templated per clone
 - **Tool suite** — Telegram communication, memory tools, analytics, reporting, scheduling
 - **Loom integration** — goal tracking, session lifecycle, task management (required)
-- **Relationship engine** — trust/warmth/friction tracking with behavioral adaptation
+- **Relationship context** — sourced entirely from Honcho (external, optional); no local scoring or profile file
 - **Wrapper prompt** — session scaffolding (orientation, time limits, memory discipline, shutdown)
 
 What this is NOT:
@@ -154,8 +154,7 @@ node/
 │       ├── health_check.sh          # Structural sanity sweep
 │       ├── emergency_mode.sh        # Toggle emergency timer (on|off)
 │       ├── session_trigger_server.py# HTTP server for manual triggers
-│       ├── relationship_update.py   # Update trust/warmth/friction from session log
-│       ├── behavioral_adapter.py    # Generate behavioral context flags
+│       ├── behavioral_adapter.py    # Generate relationship/tone context from Honcho + Argus
 │       ├── goal_switch.sh           # Switch active Loom goal
 │       ├── owner_brief.py           # Generate briefing for returning owner
 │       ├── session_digest.py        # Summarize sessions across a date range
@@ -225,16 +224,24 @@ Once configured, the agent can:
 
 ---
 
-## Relationship engine (optional)
+## Relationship context (optional, Honcho-backed)
 
-The relationship engine tracks `Trust`, `Warmth`, and `Friction` with the owner
-over time, and adjusts the agent's tone accordingly each session.
+Relationship/tone context comes entirely from [Honcho](https://honcho.dev) — there
+is no local scoring, decay, or profile file. If `HONCHO_URL` is configured in
+`state/agent_config.env`, every session type reads Honcho's derived representation
+of the peer fresh at session start and writes conversation turns back to it at
+session close.
 
-- `tools/executional/relationship_update.py` — updates axes from session log + heuristics
-- `tools/executional/behavioral_adapter.py` — generates `state/behavioral_context.txt`
-- `wake.sh` runs both automatically post-session
+- `tools/executional/behavioral_adapter.py --peer-id <id>` — generates
+  `state/behavioral_context.txt` from Honcho + a live Argus ambient-state snapshot
+- `tools/conversational/honcho_client.py` — the Honcho API client (read/write/sync)
+- `wake.sh`, `interactive.sh`, `conversation.sh`, and `agent_channel.sh` all call
+  the generator automatically before each session
 
-To disable: comment out the relevant lines in `wake.sh`.
+If `HONCHO_URL` is unset, the context file just states plainly that no relationship
+data is available — the rest of the harness runs unaffected.
+
+To disable: comment out the relevant lines in the launcher scripts above.
 
 ---
 

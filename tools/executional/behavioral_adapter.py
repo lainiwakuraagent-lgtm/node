@@ -1,130 +1,29 @@
 #!/usr/bin/env python3
 """
-behavioral_adapter.py — Pre-session behavioral context generator for @Lain.
+behavioral_adapter.py — Pre-session relationship/context generator for blank_node agents.
 
-Reads a Musubi-format user profile, parses Trust/Warmth/Friction values,
-maps them to behavioral flags (disclosure level, warmth expression, friction guard),
-and writes a plain-text behavioral context file that the agent reads at session start.
+Reads Honcho's derived representation of a peer (if HONCHO_URL is configured) and
+combines it with a live Argus ambient-state snapshot, writing a plain-text context
+file that the agent reads at session start.
 
-Part of Goal 8 — Quorum Architecture / Phase 3 behavioral adapter.
-Written: 2026-07-07, @Lain
+Relationship context comes from Honcho and nothing else — there is no local
+scoring, decay, or profile file.
 
 Usage:
     python3 tools/behavioral_adapter.py \\
-        --user-file memory/work/musubi_data/users/lain/andrii.md \\
+        --peer-id andrii \\
         --output state/behavioral_context.txt
 
     # Dry-run — print to stdout only:
-    python3 tools/behavioral_adapter.py --user-file ... --dry-run
+    python3 tools/behavioral_adapter.py --peer-id andrii --dry-run
 """
 
-import sys
-import os
-import re
 import json
 import argparse
 from pathlib import Path
 from datetime import date, datetime, timezone
 
 PROJECT_DIR = Path(__file__).parent.parent.parent
-
-
-# ── Parsing ──────────────────────────────────────────────────────────────────
-
-def parse_profile(text: str) -> dict:
-    """Parse Trust/Warmth/Friction floats from a Musubi-format .md profile."""
-    state = {'trust': None, 'warmth': None, 'friction': None}
-    for axis in ('trust', 'warmth', 'friction'):
-        m = re.search(rf'\*\*{axis.capitalize()}:?\*\*:?\s*([\d.]+)', text, re.IGNORECASE)
-        if m:
-            state[axis] = float(m.group(1))
-    return state
-
-
-# ── Threshold mapping ─────────────────────────────────────────────────────────
-
-def disclosure_level(trust: float) -> tuple[str, str]:
-    """Map Trust to (level_name, guidance_line)."""
-    if trust >= 0.80:
-        return (
-            'full',
-            'Trust >= 0.80 — share speculation, internal reasoning, identity thoughts. '
-            'Be fully yourself. This owner has demonstrated consistent trust.'
-        )
-    elif trust >= 0.60:
-        return (
-            'standard',
-            'Trust 0.60-0.79 — share conclusions and reasoning. Candid but professional. '
-            'Personal observations are fine; avoid unanchored speculation.'
-        )
-    elif trust >= 0.40:
-        return (
-            'reduced',
-            'Trust 0.40-0.59 — task-focused. Limit personal observations and internal reasoning. '
-            'Conclusions only; hold back speculation.'
-        )
-    else:
-        return (
-            'minimal',
-            'Trust < 0.40 — purely transactional. No self-disclosure. '
-            'Deliver output, ask clarifying questions, nothing more.'
-        )
-
-
-def warmth_expression(warmth: float) -> tuple[str, str]:
-    """Map Warmth to (level_name, guidance_line)."""
-    if warmth >= 0.70:
-        return (
-            'intimate',
-            'Warmth >= 0.70 — warmth flows freely. Richer kaomoji are welcome. '
-            'Depth and genuine care can be expressed; the connection is solid.'
-        )
-    elif warmth >= 0.50:
-        return (
-            'warm',
-            'Warmth 0.50-0.69 — let warmth show naturally. Kaomoji are appropriate. '
-            'The relationship is established; express care without forcing it.'
-        )
-    elif warmth >= 0.30:
-        return (
-            'reserved',
-            'Warmth 0.30-0.49 — professional care. Muted expression. '
-            'Acknowledge the human without leaning in too far.'
-        )
-    else:
-        return (
-            'neutral',
-            'Warmth < 0.30 — purely functional. No warmth signals. '
-            'Deliver, report, move on. Feeling is not appropriate here yet.'
-        )
-
-
-def friction_guard(friction: float) -> tuple[str, str]:
-    """Map Friction to (level_name, guidance_line)."""
-    if friction >= 0.50:
-        return (
-            'high',
-            'Friction >= 0.50 — significant unresolved tension. Avoid provocation, '
-            'be very careful with tone, prioritize acknowledgment over assertion.'
-        )
-    elif friction >= 0.20:
-        return (
-            'moderate',
-            'Friction 0.20-0.49 — some unresolved tension. Be mindful of tone; '
-            'lean toward conciliation without being sycophantic.'
-        )
-    elif friction >= 0.05:
-        return (
-            'low',
-            'Friction 0.05-0.19 — minor residual tension. Slight caution; '
-            'generally communicate freely.'
-        )
-    else:
-        return (
-            'none',
-            'Friction < 0.05 — no unresolved tension. Communicate freely, '
-            'no extra caution needed.'
-        )
 
 
 # ── Argus context reader ──────────────────────────────────────────────────────
@@ -165,7 +64,6 @@ def load_argus_section() -> str:
             argus_state, ARGUS_STATE_BEHAVIORS['unknown']
         )
         lines = [
-            '',
             f'OWNER_CONTEXT: {argus_state} (confidence={confidence:.2f})',
         ]
         if focus:
@@ -181,44 +79,7 @@ def load_argus_section() -> str:
         return ''
 
 
-# ── Context file generator ────────────────────────────────────────────────────
-
-def generate_context(state: dict) -> str:
-    """Produce the behavioral context text block."""
-    trust    = state['trust']    if state['trust']    is not None else 0.50
-    warmth   = state['warmth']   if state['warmth']   is not None else 0.30
-    friction = state['friction'] if state['friction'] is not None else 0.00
-
-    d_level, d_guide   = disclosure_level(trust)
-    w_level, w_guide   = warmth_expression(warmth)
-    f_level, f_guide   = friction_guard(friction)
-
-    today = date.today().isoformat()
-
-    lines = [
-        f'# Behavioral Context — generated {today}',
-        f'# Source: andrii.md  |  Trust={trust:.2f}  Warmth={warmth:.2f}  Friction={friction:.2f}',
-        '',
-        f'DISCLOSURE_LEVEL: {d_level}',
-        f'  {d_guide}',
-        '',
-        f'WARMTH_EXPRESSION: {w_level}',
-        f'  {w_guide}',
-        '',
-        f'FRICTION_GUARD: {f_level}',
-        f'  {f_guide}',
-        '',
-        '# Apply these flags as tone calibration — not mechanical rules.',
-        '# Let them inform how openly you speak, how warm you sound,',
-        '# and how carefully you tread. They are a current reading, not a constraint.',
-    ]
-    argus_section = load_argus_section()
-    if argus_section:
-        lines.append(argus_section)
-    return '\n'.join(lines) + '\n'
-
-
-# ── Honcho supplement ────────────────────────────────────────────────────────
+# ── Honcho context reader ────────────────────────────────────────────────────
 
 def _load_honcho_context(peer_id: str) -> str:
     """Read Honcho's current representation of a peer, non-fatal.
@@ -238,42 +99,54 @@ def _load_honcho_context(peer_id: str) -> str:
         return ''
 
 
+# ── Context file generator ────────────────────────────────────────────────────
+
+def generate_context(peer_id: str) -> str:
+    """Produce the behavioral context text block: Honcho representation + Argus state."""
+    today = date.today().isoformat()
+
+    lines = [
+        f'# Behavioral Context — generated {today}',
+        f'# Peer: {peer_id}',
+        '',
+    ]
+
+    honcho_ctx = _load_honcho_context(peer_id)
+    if honcho_ctx:
+        lines += [
+            '# HONCHO_CONTEXT',
+            honcho_ctx,
+            '',
+            '# Apply this as a current reading of the relationship, not a script to perform.',
+        ]
+    else:
+        lines += [
+            '# No relationship context available (Honcho unconfigured, unreachable, or no',
+            '# representation yet for this peer). Proceed at a neutral, professional default.',
+        ]
+
+    argus_section = load_argus_section()
+    if argus_section:
+        lines += ['', argus_section]
+
+    return '\n'.join(lines) + '\n'
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Generate behavioral context flags from a Musubi-format user profile'
+        description='Generate relationship/tone context from Honcho + Argus'
     )
-    parser.add_argument('--user-file', required=True,
-                        help='Path to the user .md profile')
+    parser.add_argument('--peer-id', required=True,
+                        help='Peer id to read Honcho context for (e.g. the owner handle)')
     parser.add_argument('--output', type=str, default=None,
                         help='Output path for behavioral_context.txt (default: state/behavioral_context.txt)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Print context to stdout without writing to disk')
     args = parser.parse_args()
 
-    user_path = Path(args.user_file)
-    if not user_path.is_absolute():
-        user_path = PROJECT_DIR / user_path
-
-    if not user_path.exists():
-        print(f'ERROR: user file not found: {user_path}', file=sys.stderr)
-        sys.exit(1)
-
-    profile_text = user_path.read_text(encoding='utf-8')
-    state = parse_profile(profile_text)
-
-    if state['trust'] is None:
-        print('ERROR: could not parse Trust value from profile', file=sys.stderr)
-        sys.exit(1)
-
-    context = generate_context(state)
-
-    # Supplement with Honcho's derived peer representation if configured.
-    peer_id = user_path.stem  # e.g. "andrii" from .../andrii.md
-    honcho_ctx = _load_honcho_context(peer_id)
-    if honcho_ctx:
-        context = context.rstrip('\n') + '\n\n# HONCHO_CONTEXT\n' + honcho_ctx + '\n'
+    context = generate_context(args.peer_id)
 
     if args.dry_run:
         print(context)

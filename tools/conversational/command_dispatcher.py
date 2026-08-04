@@ -122,18 +122,16 @@ def _last_session_csv(n=1):
 
 
 def _andrii_relationship():
-    """Read trust/warmth/friction from andrii.md."""
-    andrii_path = PROJECT_DIR / "memory" / "work" / "musubi_data" / "users" / AGENT_NAME / f"{OWNER_NAME}.md"
-    if not andrii_path.exists():
+    """Read Honcho's current representation of the owner, if configured. Non-fatal."""
+    try:
+        _conv_tools_dir = str(SCRIPT_DIR)
+        if _conv_tools_dir not in sys.path:
+            sys.path.insert(0, _conv_tools_dir)
+        from honcho_client import honcho_read_context  # type: ignore
+        ctx = honcho_read_context(OWNER_NAME)
+        return ctx or None
+    except Exception:
         return None
-    text = andrii_path.read_text()
-    import re
-    vals = {}
-    for key in ("Trust", "Warmth", "Friction"):
-        m = re.search(r"\*\*" + key + r":\*\*\s*([\d.]+)", text)
-        if m:
-            vals[key.lower()] = m.group(1)
-    return vals
 
 
 CONV_STATE_DIR = PROJECT_DIR / "state" / "conversation"
@@ -241,11 +239,10 @@ def cmd_status():
 
     # Context
     ctx = read_state("behavioral_context.txt", "")
-    if "Trust=" in ctx:
-        import re
-        m = re.search(r"Trust=([\d.]+)\s+Warmth=([\d.]+)", ctx)
-        if m:
-            lines.append(f"Relationship: trust={m.group(1)} warmth={m.group(2)}")
+    if "# HONCHO_CONTEXT" in ctx:
+        snippet = ctx.split("# HONCHO_CONTEXT", 1)[1].strip().splitlines()
+        if snippet:
+            lines.append(f"Relationship: {snippet[0][:120]}")
 
     return "\n".join(lines)
 
@@ -391,7 +388,8 @@ def cmd_who():
 
     rel = _andrii_relationship()
     if rel:
-        lines.append(f"Relationship → {OWNER_NAME.capitalize()}: trust={rel.get('trust','?')} warmth={rel.get('warmth','?')} friction={rel.get('friction','?')}")
+        snippet = rel.splitlines()[0][:120] if rel.strip() else ""
+        lines.append(f"Relationship → {OWNER_NAME.capitalize()} (Honcho): {snippet}")
 
     em_active = (PROJECT_DIR / "state" / "emergency_mode.active").exists()
     mode = read_state("trigger_mode.txt", "?")

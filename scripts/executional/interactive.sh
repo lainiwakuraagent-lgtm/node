@@ -75,11 +75,10 @@ if [ -d "$LOOM_SRC" ] && [ -f "$LOOM_SRC/.venv/bin/python" ]; then
     || echo "[warn] Loom context refresh failed (continuing)"
 fi
 
-# --- Refresh behavioral context (non-fatal) ---
-BEHAVIORAL_PROFILE="memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md"
-if [ -f "tools/executional/behavioral_adapter.py" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
+# --- Refresh behavioral context from Honcho + Argus (non-fatal) ---
+if [ -f "tools/executional/behavioral_adapter.py" ]; then
   /usr/bin/python3 tools/executional/behavioral_adapter.py \
-    --user-file "$BEHAVIORAL_PROFILE" \
+    --peer-id "$OWNER_NAME" \
     --output state/behavioral_context.txt > /dev/null 2>&1 \
     && echo "[ok] Behavioral context refreshed" \
     || echo "[warn] Behavioral context refresh failed (continuing)"

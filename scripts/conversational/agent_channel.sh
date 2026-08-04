@@ -127,6 +127,23 @@ while true; do
     SESSION_OUT="$LOG_DIR/channel_${CHANNEL_ID}_$(date +%Y-%m-%d)_${RESTART_COUNT}.out"
     SESSION_ERR="$LOG_DIR/channel_${CHANNEL_ID}_$(date +%Y-%m-%d)_${RESTART_COUNT}.err"
 
+    # Refresh behavioral context from Honcho + Argus (non-fatal).
+    # peer_id comes from nexus_session_context.json, written by nexus_watcher.py
+    # at spawn time -- same file the post-session Honcho sync reads below.
+    PRE_CTX_FILE="$CHANNEL_DIR/nexus_session_context.json"
+    PRE_PEER_ID=""
+    if [ -f "$PRE_CTX_FILE" ]; then
+        PRE_PEER_ID=$(/usr/bin/python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('peer_id',''))" "$PRE_CTX_FILE" 2>/dev/null || true)
+    fi
+    BEHAVIORAL_TOOL="$PROJECT_DIR/tools/executional/behavioral_adapter.py"
+    if [ -f "$BEHAVIORAL_TOOL" ] && [ -n "$PRE_PEER_ID" ]; then
+        /usr/bin/python3 "$BEHAVIORAL_TOOL" \
+            --peer-id "$PRE_PEER_ID" \
+            --output "$STATE_DIR/behavioral_context.txt" > /dev/null 2>&1 \
+            && log_line "behavioral context refreshed." \
+            || log_line "WARNING: behavioral_adapter.py failed (non-fatal)."
+    fi
+
     # Build prompt: agent_channel.md + soul.md (identity/persona), substituting tokens
     SESSION_PROMPT=$(mktemp "$STATE_DIR/channel_prompt.XXXXXX.md")
     {

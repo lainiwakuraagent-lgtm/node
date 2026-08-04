@@ -5,7 +5,7 @@ web_server.py — Node Web UI backend (generic)
 Monitoring and control dashboard for autonomous agent nodes built on the
 blank_node template. Capability-driven: panels activate when the data they
 need exists. Works for any node; extra panels appear automatically for nodes
-with soul.md, musubi relationship data, or character consistency tooling.
+with soul.md, Honcho-derived relationship data, or character consistency tooling.
 
 Usage:
   python3 tools/web_server.py [--port 8767] [--host 0.0.0.0]
@@ -107,6 +107,20 @@ def owner_name() -> str:
     return read_env("OWNER_NAME") or "owner"
 
 
+def _extract_honcho_context(behavioral_text: str) -> str:
+    """Pull the text under the # HONCHO_CONTEXT marker out of behavioral_context.txt, or ''."""
+    marker = "# HONCHO_CONTEXT"
+    if marker not in behavioral_text:
+        return ""
+    after = behavioral_text.split(marker, 1)[1]
+    lines = []
+    for line in after.splitlines()[1:]:
+        if line.strip().startswith("# Apply this as a current reading"):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 # ---------------------------------------------------------------------------
 # Helpers — analytics DB
 # ---------------------------------------------------------------------------
@@ -203,11 +217,9 @@ def detect_capabilities() -> dict:
         "manual_trigger": (TOOLS_DIR / "session_trigger_server.py").exists(),
         "wake_sh": (SCRIPTS_DIR / "wake.sh").exists(),
     }
-    # Relationship: musubi_data/users/<agent>/<owner>.md
-    an = agent_name()
-    on = owner_name()
-    rel_path = MEMORY_DIR / "work" / "musubi_data" / "users" / an / f"{on}.md"
-    caps["relationship"] = rel_path.exists()
+    # Relationship: sourced entirely from Honcho now — panel is relevant
+    # whenever a Honcho server is configured for this node.
+    caps["relationship"] = bool(read_env("HONCHO_URL"))
     return caps
 
 
@@ -266,20 +278,13 @@ def _get_status() -> dict:
         if rows:
             last_session = rows[-1]
 
-    # Behavioral context
+    # Behavioral context — Honcho-derived relationship text, if any
     behavioral = {}
     bc_file = STATE_DIR / "behavioral_context.txt"
     if bc_file.exists():
-        text = bc_file.read_text()
-        for line in text.splitlines():
-            m = re.match(r"^#.*Trust=([\d.]+).*Warmth=([\d.]+).*Friction=([\d.]+)", line)
-            if m:
-                behavioral = {
-                    "trust": float(m.group(1)),
-                    "warmth": float(m.group(2)),
-                    "friction": float(m.group(3)),
-                }
-                break
+        honcho_ctx = _extract_honcho_context(bc_file.read_text())
+        if honcho_ctx:
+            behavioral = {"honcho_context": honcho_ctx}
 
     # Next nightly slots (local time approximation)
     night_slots = ["23:00", "01:10", "02:25", "03:40", "04:55"]
@@ -571,17 +576,14 @@ def _get_character() -> dict:
         result["available"] = True
         result["soul_excerpt"] = _read_head(soul_path, lines=30)
 
-    # Behavioral context
+    # Behavioral context — Honcho-derived relationship text, if any
     bc_file = STATE_DIR / "behavioral_context.txt"
     if bc_file.exists():
         text = bc_file.read_text()
         result["behavioral_raw"] = text
-        for line in text.splitlines():
-            m = re.match(r"^#.*Trust=([\d.]+).*Warmth=([\d.]+).*Friction=([\d.]+)", line)
-            if m:
-                result["trust"] = float(m.group(1))
-                result["warmth"] = float(m.group(2))
-                result["friction"] = float(m.group(3))
+        honcho_ctx = _extract_honcho_context(text)
+        if honcho_ctx:
+            result["relationship_excerpt"] = honcho_ctx
 
     # Character consistency from session files
     sessions_dir = MEMORY_DIR / "sessions"
@@ -621,15 +623,8 @@ def _get_character() -> dict:
             "costly_signal_count": sessions_with_costly,
         }
 
-    # Relationship data
-    an = agent_name()
-    on = owner_name()
-    rel_path = MEMORY_DIR / "work" / "musubi_data" / "users" / an / f"{on}.md"
-    if rel_path.exists():
-        result["relationship_excerpt"] = _read_head(rel_path, lines=40)
-        result["relationship_available"] = True
-    else:
-        result["relationship_available"] = False
+    # Relationship data — already populated from Honcho above, if present
+    result["relationship_available"] = bool(result.get("relationship_excerpt"))
 
     return result
 

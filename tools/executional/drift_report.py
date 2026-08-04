@@ -19,13 +19,15 @@ from pathlib import Path
 
 # Files to track for harness-level drift.
 # These exist in both blank_node and agent_project and should stay in sync.
+#
+# wake.sh, behavioral_adapter.py, and command_dispatcher.py were removed from
+# this list 2026-08-04: blank_node moved to Honcho-only relationship context
+# (Musubi Trust/Warmth/Friction removed), agent_project intentionally did not.
+# Tracking them here would just report the same known, permanent fork forever.
+# relationship_update.py was deleted from blank_node outright for the same reason.
 TRACKED_FILES = [
-    "scripts/executional/wake.sh",
     "scripts/executional/resolve_session_type.py",
     "tools/executional/analytics_write.py",
-    "tools/executional/relationship_update.py",
-    "tools/executional/behavioral_adapter.py",
-    "tools/conversational/command_dispatcher.py",
     "tools/conversational/telegram_send.sh",
     "tools/inbox.py",
     "tools/executional/session_trigger_server.py",

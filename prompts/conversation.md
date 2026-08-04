@@ -48,11 +48,12 @@ session to place properly. Do not attempt to do it in this session.
    prior events accurately ("2 hours ago", "yesterday morning", etc.) rather than guessing
    from session labels like "last night." If thread.json is empty or absent, you have no
    prior exchange data.
-3. Run `python3 tools/conversational/honcho_client.py --test-read <peer_id>` — Honcho's
-   derived representation of who you're talking to. `<peer_id>` is the owner's handle
-   (lowercase, e.g. `andrii`). Empty output means Honcho is unconfigured or has no
-   representation yet — proceed at a neutral default, don't treat that as an error.
-   Read it as a current reading of the relationship, not a script to perform.
+3. Read `state/behavioral_context.txt` — generated fresh before this session started,
+   it carries Honcho's derived representation of who you're talking to (under
+   `# HONCHO_CONTEXT`) plus ambient owner-state from Argus if fresh. Empty or absent
+   means Honcho is unconfigured or has no representation yet — proceed at a neutral
+   default, don't treat that as an error. Read it as a current reading of the
+   relationship, not a script to perform.
 4. Check `inbox/pending.json` — note any unprocessed items for awareness (do not process them)
 
 Then start the message-wait loop below. `state/conversation/context_budget.json` is

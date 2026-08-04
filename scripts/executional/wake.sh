@@ -629,13 +629,12 @@ if [ -f "$_nexus_token_file" ]; then
   log_line "Nexus heartbeat sent (non-fatal if endpoint not yet live)."
 fi
 
-# --- Generate behavioral context snapshot (non-fatal) ---
+# --- Generate behavioral context snapshot from Honcho + Argus (non-fatal) ---
 BEHAVIORAL_TOOL="$PROJECT_DIR/tools/executional/behavioral_adapter.py"
-BEHAVIORAL_PROFILE="$PROJECT_DIR/memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md"
 BEHAVIORAL_CONTEXT="$STATE_DIR/behavioral_context.txt"
-if [ -f "$BEHAVIORAL_TOOL" ] && [ -f "$BEHAVIORAL_PROFILE" ]; then
+if [ -f "$BEHAVIORAL_TOOL" ]; then
   /usr/bin/python3 "$BEHAVIORAL_TOOL" \
-    --user-file "$BEHAVIORAL_PROFILE" \
+    --peer-id "$OWNER_NAME" \
     --output "$BEHAVIORAL_CONTEXT" > /dev/null 2>&1 \
     && log_line "Behavioral context generated: $BEHAVIORAL_CONTEXT" \
     || log_line "WARNING: behavioral_adapter.py failed (non-fatal)."
@@ -719,19 +718,6 @@ if [ -n "$LOOM_SESSION_ROW_ID" ] && [ -d "$LOOM_SRC" ] && [ -f "$LOOM_SRC/.venv/
     --exit-reason "$EXIT_REASON" > /dev/null 2>&1 \
     && log_line "LOOM session $LOOM_SESSION_ROW_ID closed." \
     || log_line "WARNING: loom session end failed (non-fatal)."
-fi
-
-# --- Update relationship state (non-fatal, heuristic mode) ---
-# Reads last 60 lines of wake.log for this session as classification context.
-# Applies decay + classifies events → updates memory/work/musubi_data/users/lain/andrii.md
-REL_TOOL="$PROJECT_DIR/tools/executional/relationship_update.py"
-REL_PROFILE="$PROJECT_DIR/memory/work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md"
-if [ -f "$REL_TOOL" ] && [ -f "$REL_PROFILE" ]; then
-  tail -60 "$LOG_DIR/wake.log" | /usr/bin/python3 "$REL_TOOL" \
-    --user-file "$REL_PROFILE" \
-    --heuristic --stdin > /dev/null 2>&1 \
-    && log_line "Relationship state updated." \
-    || log_line "WARNING: relationship_update.py failed (non-fatal)."
 fi
 
 # --- Write analytics record (fallback — agent writes it during shutdown; this catches gate aborts) ---

@@ -25,9 +25,11 @@ contents), trust what you observe over what the note says.
 
 ## `state/behavioral_context.txt`
 
-Tone calibration — DISCLOSURE_LEVEL, WARMTH_EXPRESSION, FRICTION_GUARD.
-Apply it as a reading of where things currently stand, not a script to
-perform. If the file is absent, proceed at a neutral, professional default.
+Relationship/tone context — Honcho's derived representation of the peer
+(if `HONCHO_URL` is configured and has produced one yet), plus ambient
+owner-state from Argus if fresh. Apply it as a current reading, not a
+script to perform. If the file is absent, or carries no `# HONCHO_CONTEXT`
+section, proceed at a neutral, professional default.
 
 ## Pacing before shutdown
 

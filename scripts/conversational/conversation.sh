@@ -207,6 +207,16 @@ while true; do
     SESSION_OUT="$LOG_DIR/conversation_$(date +%Y-%m-%d)_${RESTART_COUNT}.out"
     SESSION_ERR="$LOG_DIR/conversation_$(date +%Y-%m-%d)_${RESTART_COUNT}.err"
 
+    # Refresh behavioral context from Honcho + Argus (non-fatal).
+    BEHAVIORAL_TOOL="$PROJECT_DIR/tools/executional/behavioral_adapter.py"
+    if [ -f "$BEHAVIORAL_TOOL" ]; then
+        /usr/bin/python3 "$BEHAVIORAL_TOOL" \
+            --peer-id "$OWNER_NAME" \
+            --output "$STATE_DIR/behavioral_context.txt" > /dev/null 2>&1 \
+            && log_line "CONV: behavioral context refreshed." \
+            || log_line "CONV: WARNING: behavioral_adapter.py failed (non-fatal)."
+    fi
+
     # Build prompt: conversation.md + soul.md (identity/persona).
     # conversation.md uses ${AGENT_NAME}/${OWNER_NAME} tokens for identity paths
     # (same convention resolve_session_type.py substitutes for other session

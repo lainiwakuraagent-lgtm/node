@@ -61,8 +61,7 @@ tools/
     emergency_mode.sh     # toggle emergency timer (on|off)
     goal_switch.sh        # switch active Loom goal
     session_trigger_server.py  # HTTP server for manual triggers (port 8766)
-    behavioral_adapter.py      # generate behavioral context flags
-    relationship_update.py     # update trust/warmth/friction axes
+    behavioral_adapter.py      # generate relationship/tone context from Honcho + Argus
     analytics_write.py         # write session analytics to analytics.db
     session_report.py          # session report generator
     session_digest.py          # multi-session summary

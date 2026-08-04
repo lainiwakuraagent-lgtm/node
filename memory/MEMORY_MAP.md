@@ -22,9 +22,9 @@ system is shaped this way, see `prompts/reference/memory_strategy.md`.
 | `identity/wonder_sessions/` | One file per philosophy-tier-1 wonder session, dated. |
 
 Kept separate from `work/` deliberately: this is personal/reflective accumulation,
-not working notes tied to a Loom unit's lifecycle. The relationship file
-(trust/warmth/friction) is adjacent in purpose but lives under
-`work/musubi_data/` for now — see `work/` below.
+not working notes tied to a Loom unit's lifecycle. Relationship state itself
+isn't kept as a local file at all — it lives entirely in Honcho, read fresh
+into `state/behavioral_context.txt` each session. See `prompts/reference/memory_strategy.md`.
 
 ## `knowledge/` — durable, topic-organized facts, not scoped to any goal or task
 
@@ -42,7 +42,6 @@ one of these versus updating an existing file or just logging to
 |---|---|
 | `work/goal_<goal_id>/` | Notes/design docs scoped to one goal as a whole. Created on demand, not pre-made. |
 | `work/project_<project_id>/` | Notes/design docs scoped to one project. Task-level context lives in the task's own Loom description, not a separate folder. |
-| `work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md` | Relationship state (trust/warmth/friction, observations) — parsed live by `tools/executional/behavioral_adapter.py` into `state/behavioral_context.txt`. Load-bearing, not a leftover. If `HONCHO_URL` is configured in `state/agent_config.env`, Honcho's derived peer representation is appended as a `# HONCHO_CONTEXT` supplement; the `.md` file remains the primary source. |
 | `work/context_updates.md` | Auto-appended by `inbox.py` from `context_update`-type inbox entries. |
 | `work/agent_messages.md` | Auto-appended by `inbox.py` from `agent_message`-type inbox entries (peer agents via Nexus). |
 | `work/architecture/` | Notes on this codebase's own architecture. |

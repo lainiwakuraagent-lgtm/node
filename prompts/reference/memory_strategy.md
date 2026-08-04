@@ -139,27 +139,29 @@ for a category of task, `knowledge/` gives a fact worth carrying that isn't
 tied to any procedure. Full SOP reference — including the scope test for
 when a new SOP is warranted — lives in `prompts/reference/tools/loom.md`.
 
-## Behavioral context — relationship file + Honcho supplement
+## Behavioral context — Honcho, and nothing else
 
-`state/behavioral_context.txt` is generated at session start by
-`tools/executional/behavioral_adapter.py` from
-`work/musubi_data/users/${AGENT_NAME}/${OWNER_NAME}.md`. It is not a memory
-file — it is generated state, regenerated every wake.
+`state/behavioral_context.txt` is generated fresh before every session (any
+type — execution, conversational, Nexus channel) by
+`tools/executional/behavioral_adapter.py --peer-id <id>`. It is not a memory
+file — it is generated state, regenerated every time.
 
-If `HONCHO_URL` is set in `state/agent_config.env`, the generator appends
-Honcho's derived representation of the peer as a `# HONCHO_CONTEXT` section
-after the standard Trust/Warmth/Friction block.
+Relationship context comes entirely from Honcho. There is no local scoring,
+decay, or profile file — the generator calls `honcho_read_context(peer_id)`
+and writes whatever representation comes back under a `# HONCHO_CONTEXT`
+section, plus a live Argus ambient-state snapshot if fresh.
 
 Fallback behavior:
-- `HONCHO_URL` unset → output is `.md`-only, identical to pre-Honcho behavior
-- `HONCHO_URL` set but unreachable → same (graceful fallback, silent)
-- `HONCHO_URL` set and reachable → `# HONCHO_CONTEXT` appended with Honcho's representation
+- `HONCHO_URL` unset → file states plainly that no relationship context is
+  available; proceed at a neutral, professional default
+- `HONCHO_URL` set but unreachable, or no representation yet for this peer → same
+- `HONCHO_URL` set and reachable, representation exists → `# HONCHO_CONTEXT`
+  section included
 
-The `.md` file is always the primary source. Honcho supplements; it does not replace.
-Conversational sessions write to Honcho automatically — `conversation.sh` and
+Every session type writes to Honcho automatically — `conversation.sh` and
 `agent_channel.sh` both sync each closed session's new thread entries via
 `honcho_client.py --sync-thread` right after the session exits, regardless of exit
-reason — so the supplement grows richer as more sessions complete without any
+reason — so the representation grows richer as more sessions complete without any
 skill needing to do it.
 
 ---
