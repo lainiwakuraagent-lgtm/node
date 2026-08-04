@@ -21,6 +21,13 @@ session, but as the main work.
 
 The first empty-queue session. Nothing has been processed yet this cycle.
 
+**If the ## SCOPE framing above this file names a target goal, read its
+description before anything else.** A goal whose description describes an
+unresolved purpose or onboarding state (rather than a settled standing
+mandate) means that investigation IS this tier's work — not a preamble to
+skip before the wonder work below. Follow what it asks; don't default to
+generic identity wonder until it's actually exhausted.
+
 **What to read first** — both, before writing anything:
 1. `memory/identity/soul.md` — what has shifted since you last looked here.
 2. `state/philosophy_drafts.md` — messages held back, thoughts not yet sent.

@@ -494,6 +494,17 @@ LOOM_DB="${HOME}/.local/share/loom/${AGENT_NAME}.db"
 EXAMPLE_FILE="${PROJECT_DIR}/state/agent_config.env.example"
 RESOLVED_MODEL="${MODEL:-claude-sonnet-4-6}"
 
+# This step regenerates agent_config.env unconditionally on every install.sh
+# run (re-runs are how Telegram creds / other steps get added later), which
+# would otherwise silently drop an already-set DEFAULT_GOAL_ID — including
+# the one Step 8 sets automatically. Capture it now, restore it after write.
+_prior_default_goal_id=""
+if [ "$REMOTE" = "1" ]; then
+  _prior_default_goal_id=$(ssh_run "grep -E '^DEFAULT_GOAL_ID=' '${AGENT_CONFIG}' 2>/dev/null | tail -1" 2>/dev/null || echo "")
+elif [ -f "$AGENT_CONFIG" ]; then
+  _prior_default_goal_id=$(grep -E '^DEFAULT_GOAL_ID=' "$AGENT_CONFIG" 2>/dev/null | tail -1 || echo "")
+fi
+
 if [ ! -f "$EXAMPLE_FILE" ]; then
   warn "agent_config.env.example not found at ${EXAMPLE_FILE} — writing minimal config"
   if [ "$DRY_RUN" = "0" ] && [ "$REMOTE" = "0" ]; then
@@ -522,14 +533,26 @@ else
 
   if [ "$DRY_RUN" = "1" ]; then
     dry "Write state/agent_config.env (from .example, substituting AGENT_NAME/OWNER_NAME/NODE_VERSION/LOOM_DB)"
+    [ -n "$_prior_default_goal_id" ] && dry "Restore existing ${_prior_default_goal_id} after regeneration"
   elif [ "$REMOTE" = "1" ]; then
     ssh_run "cat > '${AGENT_CONFIG}'" <<< "$GENERATED_CONFIG"
     info "Written (remote): state/agent_config.env"
+    if [ -n "$_prior_default_goal_id" ]; then
+      ssh_run "sed -i 's|^# DEFAULT_GOAL_ID=.*|${_prior_default_goal_id}|' '${AGENT_CONFIG}'"
+      info "  DEFAULT_GOAL_ID preserved from previous install (remote): ${_prior_default_goal_id#DEFAULT_GOAL_ID=}"
+    fi
   else
     echo "$GENERATED_CONFIG" > "$AGENT_CONFIG"
     info "Written: state/agent_config.env"
     info "  AGENT_REPO set to '${AGENT_NAME}-node' — update if your repo name differs"
-    info "  DEFAULT_GOAL_ID: left commented out — uncomment when you have a goal in Loom"
+    if [ -n "$_prior_default_goal_id" ]; then
+      sed -i "s|^# DEFAULT_GOAL_ID=.*|${_prior_default_goal_id}|" "$AGENT_CONFIG"
+      info "  DEFAULT_GOAL_ID preserved from previous install: ${_prior_default_goal_id#DEFAULT_GOAL_ID=}"
+    elif [ "$SKIP_LOOM" = "1" ]; then
+      info "  DEFAULT_GOAL_ID: left commented out (--skip-loom) — uncomment once a goal exists"
+    else
+      info "  DEFAULT_GOAL_ID: left commented out here — Step 8 (Loom setup) auto-creates a standing Onboarding goal and sets it"
+    fi
   fi
 fi
 
@@ -1085,6 +1108,16 @@ else
   AGENT_LOOM_DIR="${INSTALL_ROOT}/loom"
   AGENT_LOOM_WRAPPER="${INSTALL_ROOT}/bin/loom"
 
+  # Standing onboarding goal, created only when the DB has zero goals (a re-run
+  # against an existing DB must not clobber a goal the agent or owner already
+  # set up). Reached only once nothing else is eligible in resolve_session_type.py's
+  # priority chain (no goal/project/task queue state, no pending inbox, maintenance
+  # not due) — so landing here means no peer/orchestrator assignment (which would
+  # arrive as an inbox verified_task entry and become a ready Loom task automatically,
+  # ahead of this goal) and no other direction has surfaced yet. One line, no embedded
+  # newlines, so it survives both direct and ssh-quoted invocation below unchanged.
+  _onboard_desc="Standing onboarding goal, auto-created by install.sh and set as DEFAULT_GOAL_ID -- reached only when Loom has no scheduled/in-progress goal, project, or ready task, no pending inbox entry, and maintenance isn't due (see resolve_session_type.py's priority chain). If a peer or orchestrator ever assigns real work via an inbox verified_task entry, it becomes a ready Loom task automatically and this goal is never reached -- so landing here means nothing has arrived yet. This is not generic identity philosophy: read prompts/persona.txt for any purpose hint the owner gave at install time (treat it as a hypothesis, not a settled answer), note explicitly in session notes or an inbox context_update that you are unassigned and awaiting direction if an owner is configured, and then genuinely investigate what you are for -- your name, your persona, who deployed you and why -- writing a specific, sharpening-over-time hypothesis rather than open-ended musing. Replace this goal entirely once a real purpose is established, from any of those sources."
+
   if [ "$DRY_RUN" = "1" ]; then
     dry "mkdir -p '${INSTALL_ROOT}/bin'"
     dry "Clone loom → ${AGENT_LOOM_DIR}  (or pull if already present)"
@@ -1093,6 +1126,7 @@ else
     dry "Run init migration against ${LOOM_DB}"
     dry "Write per-agent wrapper → ${AGENT_LOOM_WRAPPER}"
     dry "Verify loom DB is reachable (goal count query)"
+    dry "If DB has zero goals: create standing 'Onboarding' goal, set DEFAULT_GOAL_ID"
   else
     if [ "$REMOTE" = "1" ]; then
       # ── Remote Loom setup ──────────────────────────────────────────────────
@@ -1151,6 +1185,26 @@ esac"
         _goal_count=$(ssh_run "env PYTHONPATH='${AGENT_LOOM_DIR}' \
           '${AGENT_LOOM_DIR}/.venv/bin/python' -m loom.cli --db '${LOOM_DB}' goal list 2>/dev/null | { grep -c '│' || true; }" 2>/dev/null || echo "?")
         ok "Loom reachable (remote): ${_goal_count} goal row(s) in DB"
+
+        # Standing onboarding goal (remote) — only when the DB is empty
+        if [ "${_goal_count}" = "0" ]; then
+          printf '%s' "$_onboard_desc" | \
+            ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+            "${TARGET_USER}@${TARGET_HOST}" "cat > '/tmp/${AGENT_NAME}_onboard_desc.txt'"
+          _onboard_out=$(ssh_run "env PYTHONPATH='${AGENT_LOOM_DIR}' \
+            '${AGENT_LOOM_DIR}/.venv/bin/python' -m loom.cli --db '${LOOM_DB}' \
+            goal add -n Onboarding -d \"\$(cat '/tmp/${AGENT_NAME}_onboard_desc.txt')\" -s scheduled -p 5 2>&1; \
+            rm -f '/tmp/${AGENT_NAME}_onboard_desc.txt'" 2>/dev/null || echo "")
+          _onboard_id=$(printf '%s' "$_onboard_out" | grep -oE 'Created goal [0-9]+' | grep -oE '[0-9]+')
+          if [ -n "$_onboard_id" ]; then
+            ssh_run "sed -i 's|^# DEFAULT_GOAL_ID=.*|DEFAULT_GOAL_ID=${_onboard_id}|' '${AGENT_CONFIG}'"
+            ok "Onboarding goal created (remote, id ${_onboard_id}) — DEFAULT_GOAL_ID set"
+          else
+            warn "Onboarding goal creation failed (remote) — DEFAULT_GOAL_ID left unset: ${_onboard_out}"
+          fi
+        else
+          info "Loom DB already has ${_goal_count} goal(s) (remote) — skipping onboarding goal creation"
+        fi
       fi
     else
       # ── Local Loom setup ───────────────────────────────────────────────────
@@ -1211,6 +1265,23 @@ WRAPPER
           "${AGENT_LOOM_DIR}/.venv/bin/python" -m loom.cli --db "${LOOM_DB}" \
           goal list 2>/dev/null | { grep -c "│" || true; })
         ok "Loom reachable: ${_goal_count} goal row(s) in DB"
+
+        # Standing onboarding goal — only when the DB is empty (a re-run against
+        # an existing DB must not clobber a goal the agent or owner already set up)
+        if [ "${_goal_count}" = "0" ]; then
+          _onboard_out=$(env PYTHONPATH="${AGENT_LOOM_DIR}" \
+            "${AGENT_LOOM_DIR}/.venv/bin/python" -m loom.cli --db "${LOOM_DB}" \
+            goal add -n "Onboarding" -d "$_onboard_desc" -s scheduled -p 5 2>&1)
+          _onboard_id=$(printf '%s' "$_onboard_out" | grep -oE 'Created goal [0-9]+' | grep -oE '[0-9]+')
+          if [ -n "$_onboard_id" ]; then
+            sed -i "s|^# DEFAULT_GOAL_ID=.*|DEFAULT_GOAL_ID=${_onboard_id}|" "$AGENT_CONFIG"
+            ok "Onboarding goal created (id ${_onboard_id}) — DEFAULT_GOAL_ID set"
+          else
+            warn "Onboarding goal creation failed — DEFAULT_GOAL_ID left unset: ${_onboard_out}"
+          fi
+        else
+          info "Loom DB already has ${_goal_count} goal(s) — skipping onboarding goal creation"
+        fi
       fi
     fi
   fi
