@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "id": "5e5acf9a71f9",
+    "source": "internal",
+    "from": "lain",
+    "content": "Conversational-layer session analytics aren't cleanly separated from executional-layer analytics, and one of the two conversational close paths writes to the wrong place. blank_node's conversational_analytics_write.py correctly writes to a dedicated conversational_sessions table in logs/analytics.db. But the (now being retired) wrap-conversation-session skill called a different script, conv_closeout.py (agent_project-only, tools/conv_closeout.py), which inserts into the executional sessions table instead (session_type='conversation'), the same table nightly/planning/execution sessions use. Since conversation.sh/agent_channel.sh already write a conversational_sessions row automatically on every close, any session that also went through wrap-conversation-session was being double-recorded across two different tables. Needs careful consideration before any fix: is a single conversational_sessions table the right long-term shape, or does distinguishing session types at the conversational vs executional layer need a different schema entirely (e.g. richer type/subtype fields, unified table with a layer column, something else)? Please create a plan before implementation -- this is a design question, not a quick patch.",
+    "timestamp": 1785834952,
+    "type": "request",
+    "processed": false,
+    "kind": "idea"
+  }
+]

@@ -63,6 +63,7 @@ export SESSION_TYPE="agent_channel"
 export CURRENT_SESSION_TYPE="agent_channel"
 export TRIGGER_MODE="manual"
 export CHANNEL_ID
+export PROJECT_DIR
 
 log_line "Starting channel session loop (PID $$)."
 
@@ -169,6 +170,29 @@ while true; do
         --exit-reason "$EXIT_REASON" \
         2>/dev/null || true
 
+    # Push this session's new thread.json entries into Honcho (no-ops if
+    # HONCHO_URL isn't configured; incremental via honcho_last_synced.json).
+    # peer_id comes from nexus_session_context.json, written by nexus_watcher.py
+    # at spawn time -- read it here, before we clean the file up below, since
+    # the skill that ran inside the session only reads it, never deletes it.
+    CTX_FILE="$CHANNEL_DIR/nexus_session_context.json"
+    PEER_ID=""
+    if [ -f "$CTX_FILE" ]; then
+        PEER_ID=$(/usr/bin/python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('peer_id',''))" "$CTX_FILE" 2>/dev/null || true)
+    fi
+    if [ -n "$PEER_ID" ]; then
+        /usr/bin/python3 "$PROJECT_DIR/tools/conversational/honcho_client.py" \
+            --sync-thread "$PEER_ID" \
+            --session-id "${CHANNEL_ID}_${RESTART_COUNT}" \
+            --thread-file "$CHANNEL_DIR/thread.json" \
+            --marker-file "$CHANNEL_DIR/honcho_last_synced.json" \
+            2>/dev/null || true
+    fi
+    # NOTE: nexus_session_context.json is only deleted on closed_by_agent below --
+    # context_full (and crash/unknown) restart the SAME logical conversation, and
+    # session start re-reads this file every time. Deleting it here unconditionally
+    # would strand the next restart with no peer identity.
+
     case "$EXIT_REASON" in
         context_full)
             # Context window exhausted — restart with checkpoint for continuity
@@ -176,7 +200,10 @@ while true; do
             sleep 3
             ;;
         closed_by_agent)
-            # Agent invoked /close-comms-session and decided the exchange is done
+            # Agent invoked the close-conversational-session skill and decided
+            # the exchange is done. The exchange is genuinely over here, unlike
+            # context_full -- safe to drop the channel's peer-identity file.
+            rm -f "$CTX_FILE"
             log_line "Session closed cleanly by agent. Stopping."
             exit 0
             ;;

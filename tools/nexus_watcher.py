@@ -6,7 +6,7 @@ Responsibilities:
   1. Discover all Nexus conversations (not just seeded ones)
   2. Poll each channel for new messages
   3. When new messages arrive on a channel with no active session → spawn it
-  4. Write per-channel session context before spawning (for close-comms-session skill)
+  4. Write per-channel session context before spawning (for close-conversational-session skill)
 
 NOT responsible for:
   - Sending messages (the per-channel session does that)
@@ -216,7 +216,7 @@ def is_channel_session_active(channel_id: str) -> bool:
 
 
 def write_channel_context(channel_id: str, peer_id: str) -> None:
-    """Write per-channel session context before spawning (read by close-comms-session skill)."""
+    """Write per-channel session context before spawning (read by close-conversational-session skill)."""
     channel_dir = CHANNELS_DIR / channel_id
     channel_dir.mkdir(parents=True, exist_ok=True)
     ctx = {

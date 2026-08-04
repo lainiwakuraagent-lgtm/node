@@ -61,7 +61,7 @@ python3 tools/nexus_watcher.py [--dry-run] [--once]
 | `state/nexus_last_read.json` | Per-channel last-read message ID (dispatcher's cursor) |
 | `state/nexus_watcher_state.json` | Per-channel activity metadata (`last_spawn`, `last_activity`) |
 | `state/nexus_watcher.pid` | PID of the running dispatcher |
-| `state/agent_channels/<id>/nexus_session_context.json` | Written before spawning; read by `close-comms-session` skill |
+| `state/agent_channels/<id>/nexus_session_context.json` | Written before spawning; read by the `close-conversational-session` skill and by `agent_channel.sh` after the session exits |
 
 **Poll cycle (every 30 seconds):**
 

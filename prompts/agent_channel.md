@@ -38,7 +38,7 @@ Avoid long explanations; the peer is an agent, not a human needing reassurance.
 - Write `state/agent_channels/${CHANNEL_ID}/context_budget.json` — track context usage
 - Append to `inbox/pending.json` — route tasks/ideas from peer for planning to place
 - Send Nexus messages to peer via direct API call (see Sending Messages below)
-- Invoke `/close-comms-session` skill when the exchange is naturally done
+- Invoke `close-conversational-session` skill when the exchange is naturally done
 
 **Not permitted:**
 - No writes to `memory/` files (latest_summary, progress, learnings, index)
@@ -208,16 +208,17 @@ On context_soft and context_hard events, write `state/agent_channels/${CHANNEL_I
 
 ## Closing the session
 
-Invoke `/close-comms-session` skill when:
+Invoke `close-conversational-session` with `channel=${CHANNEL_ID} reason=closed_by_agent`, then
+exit 0, when:
 - The exchange has reached a natural stopping point (all threads resolved)
 - The peer has explicitly ended the conversation
 - You have determined there is nothing more to coordinate
+- The peer has gone silent for an extended period (watcher times out multiple times with
+  no messages) and there is no pending outbox intent
 
-After the skill runs, write `closed_by_agent` to `exit_reason.txt`, then exit 0.
-
-If the peer goes silent for an extended period (watcher times out multiple times with no
-messages) and there is no pending outbox intent, write `closed_by_agent` to exit_reason.txt
-and exit 0. `nexus_watcher.py` will re-spawn this service when new messages arrive.
+The skill writes the checkpoint, the relationship-summary entry, releases the watcher
+slot, and writes `exit_reason.txt` itself — don't write `exit_reason.txt` separately
+after it runs. `nexus_watcher.py` will re-spawn this service when new messages arrive.
 
 ---
 

@@ -69,8 +69,8 @@ returns with `event: "signal"`, **handle it immediately — before any response*
 
 | `action` | What to do |
 |---|---|
-| `idle_close` | Write `checkpoint.json`. Delete `reset_signal.txt`. Write `idle_close` to `exit_reason.txt`. Exit 0. Silent — no message to Andrii. The session is closing, not restarting; it just goes quiet until the next incoming message revives it. |
-| `reset` | Write `checkpoint.json`. Delete `reset_signal.txt`. Write `reset` to `exit_reason.txt`. Exit 0. Andrii already got an immediate "reset signal sent" reply from `/reset` itself — you don't need to send anything else. `conversation.sh` sends its own restart-confirmation once the new session is up; that's not your job either. |
+| `idle_close` | Invoke `close-conversational-session` with `channel=telegram reason=idle_close`, then exit 0. Silent — no message to Andrii. The session is closing, not restarting; it just goes quiet until the next incoming message revives it. |
+| `reset` | Invoke `close-conversational-session` with `channel=telegram reason=reset`, then exit 0. Andrii already got an immediate "reset signal sent" reply from `/reset` itself — you don't need to send anything else. `conversation.sh` sends its own restart-confirmation once the new session is up; that's not your job either. |
 | `unknown` | Log to `wake.log`. Delete `reset_signal.txt`. Continue the loop. |
 
 Note: `/new` never reaches you as a signal — it's a hard, non-cooperative force-close
@@ -81,8 +81,8 @@ nothing to do and nothing to prepare for.
 `maintenance_close` is a documented action with no current trigger — deferred, not wired
 up yet. If you ever see it anyway, treat it exactly like `idle_close`.
 
-Note: Write `checkpoint.json` BEFORE deleting `reset_signal.txt`. If the process crashes
-mid-exit, the next watcher relaunch re-emits the signal and the system self-heals.
+The skill writes `checkpoint.json` before deleting `reset_signal.txt`. If the process
+crashes mid-close, the next watcher relaunch re-emits the signal and the system self-heals.
 
 ---
 

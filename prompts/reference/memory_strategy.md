@@ -156,8 +156,11 @@ Fallback behavior:
 - `HONCHO_URL` set and reachable → `# HONCHO_CONTEXT` appended with Honcho's representation
 
 The `.md` file is always the primary source. Honcho supplements; it does not replace.
-Conversational sessions write to Honcho via the `/close-comms-session` skill's Step 4,
-so the supplement grows richer as more sessions complete.
+Conversational sessions write to Honcho automatically — `conversation.sh` and
+`agent_channel.sh` both sync each closed session's new thread entries via
+`honcho_client.py --sync-thread` right after the session exits, regardless of exit
+reason — so the supplement grows richer as more sessions complete without any
+skill needing to do it.
 
 ---
 

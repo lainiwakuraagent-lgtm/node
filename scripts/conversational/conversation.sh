@@ -97,6 +97,7 @@ delete_webhook
 export SESSION_TYPE="conversation"
 export CURRENT_SESSION_TYPE="conversation"
 export TRIGGER_MODE="manual"
+export PROJECT_DIR
 
 log_line "CONV: Starting conversation session loop (PID $$)."
 
