@@ -41,6 +41,7 @@ _FALLBACK_ENV_FILE = Path.home() / ".claude" / ".env"
 LAST_UPDATE_FILE = PROJECT_DIR / "state" / "conversation" / "last_update_id.txt"
 WATCHER_PID_FILE = PROJECT_DIR / "state" / "conversation" / "watcher.pid"
 OUTBOX_FILE = PROJECT_DIR / "state" / "conversation" / "outbox.json"
+LAST_REAL_MSG_FILE = PROJECT_DIR / "state" / "conversation" / "last_real_message_at.txt"
 
 # Long-poll timeout (seconds). Telegram holds the connection open for this long
 # if there are no updates. Shorter = more reconnects; longer = more blocking.
@@ -473,7 +474,14 @@ def main() -> int:
                 dispatch_command(text)
                 continue  # keep polling — don't emit to agent, don't exit
 
-            # Found a message for us — print and exit
+            # Found a message for us — record it for conv_idle_check.py's idle
+            # timer, then print and exit.
+            try:
+                LAST_REAL_MSG_FILE.parent.mkdir(parents=True, exist_ok=True)
+                LAST_REAL_MSG_FILE.write_text(str(int(time.time())))
+            except OSError:
+                pass
+
             msg_date = msg.get("date", 0)
             msg_datetime = (
                 datetime.fromtimestamp(msg_date, tz=timezone.utc).isoformat()

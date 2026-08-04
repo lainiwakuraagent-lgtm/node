@@ -184,6 +184,7 @@ done < <(pgrep -f "telegram_watcher.py" 2>/dev/null || true)
 
 # --- Auto-restart loop ---
 RESTART_COUNT=0
+LAST_EXIT_REASON=""
 while true; do
     RESTART_COUNT=$((RESTART_COUNT + 1))
     kill_stale_watcher
@@ -192,6 +193,15 @@ while true; do
     # write a fresh signal if the session actually goes idle.
     rm -f "$CONV_DIR/reset_signal.txt"
     log_line "CONV: Session start #$RESTART_COUNT"
+
+    # This iteration only runs because the previous one ended in reset/new —
+    # confirm to Andrii that the restart actually happened. Hardcoded, not
+    # agent-generated, so it doesn't depend on the new session doing anything
+    # right to be trustworthy.
+    if [ "$LAST_EXIT_REASON" = "reset" ] || [ "$LAST_EXIT_REASON" = "new" ]; then
+        printf '%s' "⚙ session restarted — back online. (´_\`)" \
+            | bash "$PROJECT_DIR/tools/conversational/telegram_send.sh" >/dev/null 2>&1 || true
+    fi
 
     SESSION_OUT="$LOG_DIR/conversation_$(date +%Y-%m-%d)_${RESTART_COUNT}.out"
     SESSION_ERR="$LOG_DIR/conversation_$(date +%Y-%m-%d)_${RESTART_COUNT}.err"
@@ -224,10 +234,14 @@ while true; do
         --model "$MODEL" \
         --dangerously-skip-permissions \
         -p "$(cat "$SESSION_PROMPT")" \
-        > "$SESSION_OUT" 2> "$SESSION_ERR"
+        > "$SESSION_OUT" 2> "$SESSION_ERR" &
+    CLAUDE_PID=$!
+    echo "$CLAUDE_PID" > "$CONV_DIR/claude.pid"
+    wait "$CLAUDE_PID"
     EXIT_CODE=$?
     set -e
 
+    rm -f "$CONV_DIR/claude.pid"
     rm -f "$SESSION_PROMPT"
 
     # Read exit reason (written by agent before exiting)
@@ -260,10 +274,13 @@ while true; do
         break
     fi
 
-    # Only restart on explicit user commands (/reset or /new).
-    # context_full and crashes stop the service — owner restarts manually.
+    # Only restart on explicit user commands (/reset, agent-cooperative, or
+    # /new, a hard kill from command_dispatcher.py). Everything else
+    # (crashes, unrecognized reasons) stops the service — owner restarts
+    # manually, or conv_watchdog.py's crash detection brings it back.
     if [ "$EXIT_REASON" = "reset" ] || [ "$EXIT_REASON" = "new" ]; then
         log_line "CONV: Explicit $EXIT_REASON — restarting in 3s."
+        LAST_EXIT_REASON="$EXIT_REASON"
         sleep 3
     else
         log_line "CONV: Exit reason '$EXIT_REASON' — not restarting. Service will stop."

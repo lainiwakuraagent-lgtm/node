@@ -23,8 +23,8 @@ Supported commands:
   /ping                Alive check with the agent's personality
   /now                 What execution layer is doing right now (HOT STATE)
   /context             Context window % for active conversational session
-  /reset               Signal conversational session to wrap up and restart
-  /new                 Same as /reset but as a clean start (no problem implied)
+  /reset               Signal conversational session to wrap up and restart (soft, cooperative)
+  /new                 Force-kill conversational session immediately, no checkpoint (hard)
   /voice on|off        Toggle Fish Audio TTS mode
   /report [session|milestone|digest|recap]  Surface latest report, mark as delivered
   /report ack [type]                  Acknowledge (mark as read)
@@ -38,10 +38,12 @@ Supported commands:
 import csv
 import json
 import os
+import signal
 import socket
 import sqlite3
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -512,12 +514,29 @@ def cmd_reset():
 
 
 def cmd_new():
-    signal_path = CONV_STATE_DIR / "reset_signal.txt"
+    """Hard force-close: kill the live session directly, no agent cooperation.
+
+    Unlike /reset, this never goes through reset_signal.txt — the agent isn't
+    given a chance to write a checkpoint or summary. exit_reason.txt is written
+    here so conversation.sh's restart-loop reads it after the process dies
+    exactly like it would after a cooperative exit.
+    """
     CONV_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    signal_path.write_text(
-        json.dumps({"action": "new", "timestamp": datetime.utcnow().isoformat()})
-    )
-    return f"{AGENT_TAG} — new session signal sent. Clean start incoming. ◉"
+    (CONV_STATE_DIR / "exit_reason.txt").write_text("new")
+    (CONV_STATE_DIR / "reset_signal.txt").unlink(missing_ok=True)
+
+    pid_path = CONV_STATE_DIR / "claude.pid"
+    if pid_path.exists():
+        try:
+            pid = int(pid_path.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(1)
+            os.kill(pid, 0)  # still alive? raises ProcessLookupError if not
+            os.kill(pid, signal.SIGKILL)
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            pass
+
+    return f"{AGENT_TAG} — force-closing now, no summary saved. Fresh session incoming. ◉"
 
 
 def cmd_voice(args):
@@ -645,8 +664,8 @@ def cmd_help():
         "/analytics     — session stats + costs\n"
         "/who           — identity + relationship state\n"
         "/context       — conversational session context %\n"
-        "/reset         — signal conv session to wrap up + restart\n"
-        "/new           — clean new conversational session\n"
+        "/reset         — soft: session wraps up (saves a checkpoint), then restarts\n"
+        "/new           — hard: force-kills the session immediately, no checkpoint\n"
         "/voice on|off  — toggle Fish Audio TTS\n"
         "/report [session|milestone|digest|recap]  — surface latest report (marks delivered)\n"
         "/report search QUERY               — search report archive (FTS)\n"

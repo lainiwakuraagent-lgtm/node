@@ -69,10 +69,17 @@ returns with `event: "signal"`, **handle it immediately — before any response*
 
 | `action` | What to do |
 |---|---|
-| `maintenance_close` | Write `checkpoint.json` (mark as 4AM maintenance close). Delete `reset_signal.txt`. Write `maintenance_close` to `exit_reason.txt`. Exit 0. |
-| `idle_close` | Write `checkpoint.json`. Delete `reset_signal.txt`. Write `idle_close` to `exit_reason.txt`. Exit 0. |
-| `reset` or `new` | Write `checkpoint.json`. Delete `reset_signal.txt`. Write the action to `exit_reason.txt`. Exit 0. |
+| `idle_close` | Write `checkpoint.json`. Delete `reset_signal.txt`. Write `idle_close` to `exit_reason.txt`. Exit 0. Silent — no message to Andrii. The session is closing, not restarting; it just goes quiet until the next incoming message revives it. |
+| `reset` | Write `checkpoint.json`. Delete `reset_signal.txt`. Write `reset` to `exit_reason.txt`. Exit 0. Andrii already got an immediate "reset signal sent" reply from `/reset` itself — you don't need to send anything else. `conversation.sh` sends its own restart-confirmation once the new session is up; that's not your job either. |
 | `unknown` | Log to `wake.log`. Delete `reset_signal.txt`. Continue the loop. |
+
+Note: `/new` never reaches you as a signal — it's a hard, non-cooperative force-close
+handled entirely by `command_dispatcher.py` and `conversation.sh` (kills the process
+directly, no checkpoint, no summary). You will simply stop existing mid-turn; there is
+nothing to do and nothing to prepare for.
+
+`maintenance_close` is a documented action with no current trigger — deferred, not wired
+up yet. If you ever see it anyway, treat it exactly like `idle_close`.
 
 Note: Write `checkpoint.json` BEFORE deleting `reset_signal.txt`. If the process crashes
 mid-exit, the next watcher relaunch re-emits the signal and the system self-heals.
@@ -98,19 +105,24 @@ mid-exit, the next watcher relaunch re-emits the signal and the system self-heal
 5a. **Track answered questions** — if the message you just received answers a question
     you previously sent (check `state/conversation/open_questions.json` for `status: open`
     entries), mark that entry's status as `answered`. Update the file.
-6. Send response via `printf '%s' "response" | bash tools/conversational/telegram_send.sh`
-7. Update `state/conversation/thread.json` (append both turns, including `datetime` string
-   for time orientation in future sessions — format: `"datetime": "2026-07-29T10:30:00+00:00"`)
-8. Update context budget (run after every exchange):
-   `python3 tools/conversational/update_conv_budget.py`
+6. Update context budget, before sending: `python3 tools/conversational/update_conv_budget.py`.
    This reads check_session.sh --context, increments message counters, and writes
-   state/conversation/context_budget.json so /context command stays accurate.
+   state/conversation/context_budget.json. Read `estimated_context_pct` back out — you'll
+   use it in the next step. There's no auto-close on context — this is purely visibility,
+   so Andrii can see it and `/reset` himself if he wants to.
+7. Send the response with the context percentage appended as a short footer on its own
+   line — response text, blank line, then `⚙ <pct>%`. Pipe the combined text through
+   `bash tools/conversational/telegram_send.sh` as usual. Keep the footer terse — just the
+   glyph and the number, nothing else. Store the clean response text (without the footer)
+   in thread.json in the next step; the footer is Telegram-display-only, not part of the
+   conversational record.
+8. Update `state/conversation/thread.json` (append both turns, including `datetime` string
+   for time orientation in future sessions — format: `"datetime": "2026-07-29T10:30:00+00:00"`)
 9. **[Fallback signal check]** The watcher handles signals structurally (step 4 above).
-    This step is a belt-and-suspenders check for edge cases (watcher crash, signal written
-    between poll cycles). If `state/conversation/reset_signal.txt` exists at this point:
-    handle it per the Signal handling section above. This should rarely fire.
-10. If context >= 70%: write checkpoint, write `context_full` to `state/conversation/exit_reason.txt`, exit 0 (conversation.sh will restart)
-11. Else: loop from step 1
+   This step is a belt-and-suspenders check for edge cases (watcher crash, signal written
+   between poll cycles). If `state/conversation/reset_signal.txt` exists at this point:
+   handle it per the Signal handling section above. This should rarely fire.
+10. Loop from step 1
 
 ---
 
