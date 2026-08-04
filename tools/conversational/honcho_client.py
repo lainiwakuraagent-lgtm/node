@@ -226,16 +226,82 @@ def honcho_write_session(
             _log(f"write_session: message batch {i // 100} failed for session {session_id}")
 
 
+def sync_thread_to_honcho(
+    peer_id: str,
+    session_id: str,
+    thread_file: str,
+    marker_file: str,
+    summary: str | None = None,
+) -> int:
+    """
+    Incrementally push new entries from a conversational thread.json into Honcho.
+
+    thread_file  : path to state/conversation/thread.json — a list of
+                   {role, message_id, text, timestamp, ...} dicts.
+    marker_file  : path to a small JSON file recording the highest
+                   message_id already synced ({"last_message_id": N}).
+                   Created on first run if absent.
+
+    Only entries with message_id > the marker are sent, so calling this
+    repeatedly (e.g. once per conversational session close) never
+    re-sends history. Returns the number of messages sent (0 if none new
+    or Honcho is unconfigured).
+    """
+    if not _enabled():
+        return 0
+
+    thread_path = Path(thread_file)
+    if not thread_path.exists():
+        return 0
+    try:
+        entries = json.loads(thread_path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        _log(f"sync_thread_to_honcho: failed to read {thread_file}: {e}")
+        return 0
+
+    marker_path = Path(marker_file)
+    last_synced = 0
+    if marker_path.exists():
+        try:
+            last_synced = json.loads(marker_path.read_text()).get("last_message_id", 0)
+        except (OSError, json.JSONDecodeError):
+            last_synced = 0
+
+    new_entries = [
+        e for e in entries
+        if isinstance(e.get("message_id"), int) and e["message_id"] > last_synced
+    ]
+    if not new_entries:
+        return 0
+
+    messages = [{"role": e.get("role", ""), "content": e.get("text", "")} for e in new_entries]
+    honcho_write_session(session_id, peer_id, messages, summary=summary)
+
+    highest = max(e["message_id"] for e in new_entries)
+    try:
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text(json.dumps({"last_message_id": highest}))
+    except OSError as e:
+        _log(f"sync_thread_to_honcho: failed to write marker {marker_file}: {e}")
+
+    return len(messages)
+
+
 # ---------------------------------------------------------------------------
-# CLI test helpers
+# CLI
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Honcho client — smoke-test CLI")
+    parser = argparse.ArgumentParser(description="Honcho client CLI")
     parser.add_argument("--test-read", metavar="PEER", help="Read context for PEER")
     parser.add_argument("--test-write", metavar="PEER", help="Write a test session for PEER")
+    parser.add_argument("--sync-thread", metavar="PEER", help="Sync new thread.json entries for PEER into Honcho")
+    parser.add_argument("--session-id", help="Session id for --sync-thread (default: date-stamped)")
+    parser.add_argument("--thread-file", default="state/conversation/thread.json", help="Path to thread.json for --sync-thread")
+    parser.add_argument("--marker-file", default="state/conversation/honcho_last_synced.json", help="Sync-position marker for --sync-thread")
+    parser.add_argument("--summary", help="Optional session summary for --sync-thread")
     args = parser.parse_args()
 
     if not _enabled():
@@ -263,6 +329,13 @@ if __name__ == "__main__":
         honcho_write_session(sid, args.test_write, msgs, summary="Standalone smoke-test session.")
         print(f"Wrote test session '{sid}' for peer '{args.test_write}'")
         print("Check Honcho Deriver queue for processing.")
+
+    elif args.sync_thread:
+        sid = args.session_id or datetime.now(timezone.utc).strftime("%Y-%m-%d_conv")
+        n = sync_thread_to_honcho(
+            args.sync_thread, sid, args.thread_file, args.marker_file, summary=args.summary,
+        )
+        print(f"Synced {n} new message(s) for '{args.sync_thread}' (session '{sid}')")
 
     else:
         parser.print_help()
