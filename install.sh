@@ -646,6 +646,34 @@ if [ -n "${NEXUS_URL:-}" ]; then
       info "Written: identity/nexus_password.txt"
     fi
   fi
+
+  # nexus_watcher.py (runtime channel spawning) reads a *different* file in a
+  # *different* format than the plain nexus_password.txt above: a seed-list
+  # at identity/nexus_seed_passwords.txt, one line per agent as
+  # "# <username> <password>", keyed by NEXUS_USERNAME (defaults to
+  # AGENT_NAME's value at runtime). Without this, nexus_watcher.py fails to
+  # authenticate and exits on every restart even though registration
+  # succeeded — a real gap, not a Docker-specific one; only ever unnoticed
+  # because nothing previously exercised install.sh -> nexus_watcher.py
+  # end-to-end on a fresh agent.
+  NEXUS_SEED_DEST="${PROJECT_DIR}/identity/nexus_seed_passwords.txt"
+  [ "$REMOTE" = "1" ] && NEXUS_SEED_DEST="${INSTALL_ROOT}/identity/nexus_seed_passwords.txt"
+  if [ "$DRY_RUN" = "1" ]; then
+    dry "Write/update ${NEXUS_SEED_DEST} with '# ${AGENT_NAME} <password>'"
+  elif [ "$REMOTE" = "1" ]; then
+    ssh_run "touch '${NEXUS_SEED_DEST}' \
+      && grep -v '^# ${AGENT_NAME} ' '${NEXUS_SEED_DEST}' > '${NEXUS_SEED_DEST}.tmp' 2>/dev/null; \
+      echo '# ${AGENT_NAME} ${NEXUS_PASSWORD}' >> '${NEXUS_SEED_DEST}.tmp' \
+      && mv '${NEXUS_SEED_DEST}.tmp' '${NEXUS_SEED_DEST}' && chmod 600 '${NEXUS_SEED_DEST}'"
+    info "Written (remote): identity/nexus_seed_passwords.txt"
+  else
+    touch "$NEXUS_SEED_DEST"
+    grep -v "^# ${AGENT_NAME} " "$NEXUS_SEED_DEST" > "${NEXUS_SEED_DEST}.tmp" 2>/dev/null || true
+    echo "# ${AGENT_NAME} ${NEXUS_PASSWORD}" >> "${NEXUS_SEED_DEST}.tmp"
+    mv "${NEXUS_SEED_DEST}.tmp" "$NEXUS_SEED_DEST"
+    chmod 600 "$NEXUS_SEED_DEST"
+    info "Written: identity/nexus_seed_passwords.txt (nexus_watcher.py's expected format)"
+  fi
 fi
 
 # credentials.md stub (only if not already present)
@@ -724,6 +752,7 @@ elif [ "$DRY_RUN" = "1" ]; then
 else
   _nexus_resp="/tmp/nexus_reg_resp_$$.json"
   HTTP_STATUS=$(curl -s -o "$_nexus_resp" -w "%{http_code}" \
+    --connect-timeout 10 --max-time 20 \
     -X POST "${NEXUS_URL}/auth/register" \
     -H "Content-Type: application/json" \
     -d "{\"username\":\"${AGENT_NAME}\",\"display_name\":\"${AGENT_NAME}\",\"password\":\"${NEXUS_PASSWORD}\"}" \
@@ -801,6 +830,9 @@ step "7: Systemd units"
 
 if [ "$SYSTEMD_AVAILABLE" = "0" ]; then
   info "SKIP — systemd --user not available"
+  info "Docker/supervisord deployments: no action needed — scheduling and services"
+  info "are already handled by scripts/docker/supervisord.conf's static programs"
+  info "(conversation, nexus-watcher, scheduler, channel-watchdog)."
   info "To run manually: bash ${INSTALL_ROOT}/scripts/executional/wake.sh"
 else
   # Resolve paths for local vs remote

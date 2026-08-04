@@ -1,0 +1,47 @@
+# docker-compose.yml — example blank_node agent deployment.
+#
+# One generic image (see Dockerfile), configured entirely via the env vars
+# below — same non-interactive config surface install.sh already reads
+# directly (see install.sh's own header comment). Only /app's stateful
+# subdirectories are named volumes, not all of /app — that way a rebuilt
+# image (code changes) actually takes effect on the next `docker compose up`,
+# while state/identity/memory/logs/Claude-auth survive restarts and rebuilds.
+#
+# One manual step this cannot automate (interactive OAuth):
+#   docker compose exec agent claude auth login
+#
+# Copy this file (or use a .env alongside it) and set at least AGENT_NAME.
+
+services:
+  agent:
+    build: .
+    container_name: ${AGENT_NAME:-blank-node}
+    restart: unless-stopped
+    environment:
+      AGENT_NAME: ${AGENT_NAME:?AGENT_NAME is required}
+      OWNER_NAME: ${OWNER_NAME:-andrii}
+      MODEL: ${MODEL:-}
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      NEXUS_URL: ${NEXUS_URL:-http://100.110.36.84:8900}
+      NEXUS_PASSWORD: ${NEXUS_PASSWORD:-}
+      HONCHO_URL: ${HONCHO_URL:-}
+      HONCHO_WORKSPACE: ${HONCHO_WORKSPACE:-}
+      PERSONA_NAME: ${PERSONA_NAME:-}
+      PERSONA_BACKGROUND: ${PERSONA_BACKGROUND:-}
+      PERSONA_DESCRIPTION: ${PERSONA_DESCRIPTION:-}
+    volumes:
+      - agent_state:/app/state
+      - agent_identity:/app/identity
+      - agent_memory:/app/memory
+      - agent_config:/app/config
+      - agent_logs:/app/logs
+      - agent_claude_auth:/root/.claude
+
+volumes:
+  agent_state:
+  agent_identity:
+  agent_memory:
+  agent_config:
+  agent_logs:
+  agent_claude_auth:

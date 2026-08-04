@@ -31,8 +31,24 @@ STATE_DIR="$PROJECT_DIR/state"
 SCRIPTS_DIR="$PROJECT_DIR/scripts"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 EMERGENCY_FLAG="$STATE_DIR/emergency_mode.active"
+EMERGENCY_META="$STATE_DIR/emergency_mode.json"
 INSTANCE="$(basename "$PROJECT_DIR")"
 TIMER_UNIT="emergency-agent@${INSTANCE}.timer"
+
+# Same backend detection as procctl.sh — explicit PROCESS_BACKEND in
+# agent_config.env wins; otherwise auto-detect from systemctl reachability.
+PROCESS_BACKEND="${PROCESS_BACKEND:-}"
+if [ -z "$PROCESS_BACKEND" ] && [ -f "$STATE_DIR/agent_config.env" ]; then
+  # shellcheck disable=SC1090
+  PROCESS_BACKEND="$(grep '^PROCESS_BACKEND=' "$STATE_DIR/agent_config.env" 2>/dev/null | cut -d= -f2 || true)"
+fi
+if [ -z "$PROCESS_BACKEND" ]; then
+  if systemctl --user status >/dev/null 2>&1; then
+    PROCESS_BACKEND="systemd"
+  else
+    PROCESS_BACKEND="supervisord"
+  fi
+fi
 
 if [ $# -lt 1 ]; then
   echo "Usage: emergency_mode.sh <on|off> [interval_min] [reason]" >&2
@@ -62,6 +78,26 @@ if [ "$ACTION" = "on" ]; then
   # 1. Write the emergency flag.
   echo "$REASON (activated: $TIMESTAMP)" > "$EMERGENCY_FLAG"
   echo "[OK] Emergency flag written: $EMERGENCY_FLAG"
+
+  if [ "$PROCESS_BACKEND" = "supervisord" ]; then
+    # No systemd timer to install — scheduler_loop.py (a supervisord program,
+    # already running) polls EMERGENCY_FLAG + EMERGENCY_META on its own
+    # interval and switches cadence itself. Just record the interval.
+    printf '{"interval_min": %d, "reason": %s, "activated_at": %s}\n' \
+      "$INTERVAL_MIN" \
+      "$(printf '%s' "$REASON" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().rstrip(chr(10))))')" \
+      "$(printf '%s' "$TIMESTAMP" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().rstrip(chr(10))))')" \
+      > "$EMERGENCY_META"
+    echo "[OK] Emergency interval recorded for scheduler_loop.py: ${EMERGENCY_META} (${INTERVAL_MIN}min)"
+    echo ""
+    echo "=== Emergency Mode ACTIVE ==="
+    echo "scheduler_loop.py will pick this up on its next poll (within seconds)."
+    echo "Sessions log to: $PROJECT_DIR/logs/"
+    echo ""
+    echo "To disable emergency mode:"
+    echo "  bash $PROJECT_DIR/tools/executional/emergency_mode.sh off"
+    exit 0
+  fi
 
   # 2. Install user-level systemd units.
   # emergency-agent@.service is an instance template (%i = this clone's
@@ -115,6 +151,27 @@ EOF
 # --- off ---
 elif [ "$ACTION" = "off" ]; then
   echo "=== Disabling Emergency Mode ==="
+
+  if [ "$PROCESS_BACKEND" = "supervisord" ]; then
+    rm -f "$EMERGENCY_META"
+    echo "[OK] Emergency interval file removed: ${EMERGENCY_META}"
+
+    if [ -f "$EMERGENCY_FLAG" ]; then
+      reason=$(cat "$EMERGENCY_FLAG")
+      rm -f "$EMERGENCY_FLAG"
+      echo "[OK] Emergency flag removed (was: $reason)"
+    else
+      echo "[--] Emergency flag was not present"
+    fi
+
+    echo "0" > "$STATE_DIR/sessions_emergency.count"
+    echo "[OK] sessions_emergency.count reset to 0"
+
+    echo ""
+    echo "=== Emergency Mode DISABLED ==="
+    echo "scheduler_loop.py resumes normal windows/one_off scheduling on its next poll."
+    exit 0
+  fi
 
   # 1. Stop and disable the timer.
   _uid="$(id -u)"

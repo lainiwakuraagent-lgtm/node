@@ -1,0 +1,46 @@
+# VCS / editor / tooling cruft
+.git
+.github
+.pytest_cache
+.ua
+
+# Test/backup artifacts
+_test_instances/
+_backups/
+
+# Loom is cloned fresh at Docker build time (Dockerfile) — a local checkout
+# here (if this repo happens to have one installed) is not what ships.
+loom/
+
+# Secrets and machine-specific state — never bake into an image layer.
+# entrypoint.sh runs install.sh at every container start, which regenerates
+# all of this from env vars + the persistent volume. Nothing here is needed
+# at build time, and identity/credentials.md in particular is a real secret.
+identity/credentials.md
+identity/nexus_password.txt
+identity/agent.env
+state/agent_config.env
+state/agent_channels/
+state/conversation/
+state/reports/
+state/supervisor_channels.d/
+state/*.db
+state/*.count
+state/*.date
+state/*.txt
+state/*.json
+
+# Runtime logs
+logs/*.log
+logs/*.out
+logs/*.err
+
+# Python
+__pycache__/
+*.pyc
+
+# Session/memory data specific to whatever checkout this is built from
+memory/sessions/
+memory/work/musubi_data/
+inbox/files/
+inbox/pending.json
