@@ -1,0 +1,39 @@
+# managed_paths.txt — self_update.sh allowlist
+#
+# ONLY files matching these globs may be touched by self_update.sh.
+# Paths are relative to the node repo root.
+# Glob syntax: fnmatch (Python pathlib.Path.match or shell glob).
+#
+# To add a path: edit this file in blank_node, commit, push.
+# To opt a path out on a specific node: add it to state/self_update_exclude.txt
+# (lives on the node, never in the template).
+#
+# Effective update set on any run = (entries here) - (state/self_update_exclude.txt)
+#
+# -----------------------------------------------------------------------
+# PERMANENTLY EXCLUDED — never add these, even if they look safe:
+#   state/           — live agent state, node-specific
+#   identity/        — credentials, secrets
+#   memory/          — accumulated knowledge, node-specific
+#   prompts/persona.txt — identity, intentionally diverged per node
+#   config/session_schedule.json — scheduling config, node-specific
+#   inbox/           — live inbox data
+# -----------------------------------------------------------------------
+
+# Core executional shell scripts
+scripts/executional/wake.sh
+scripts/executional/interactive.sh
+
+# All Python tools under tools/ subdirectories
+tools/executional/*.py
+tools/conversational/*.py
+
+# Session type prompts (drives nightly session behavior)
+prompts/session_types/*.md
+
+# Bootstrap/install script
+install.sh
+
+# Self-update script itself (allows self-update to update itself)
+scripts/self_update.sh
+ci/managed_paths.txt
