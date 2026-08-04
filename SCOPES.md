@@ -41,15 +41,15 @@ scripts/
 tools/
   conversational/       # owned by / called from the conversational layer
     telegram_send.sh      # send Telegram message to owner
-    telegram_watcher.py   # long-poll Telegram watcher
-    telegram_webhook_handler.py
-    telegram_check.sh     # legacy polling fallback
+    telegram_watcher.py   # long-poll Telegram watcher -- the active message path
+    telegram_webhook_handler.py  # DEAD: pre-long-poll webhook receiver, superseded
+    telegram_check.sh     # DEAD: pre-long-poll getUpdates fallback, superseded
     command_dispatcher.py # /command handler
-    check_replies.sh      # read incoming messages at session start
+    check_replies.sh      # DEAD: session-start reply check, superseded by telegram_watcher.py
     check_conv_status.sh  # conversation layer health check
     update_conv_budget.py # context budget counters
-    conv_watchdog.py               # idle-timeout watchdog
-    conv_idle_check.py             # companion to conv_watchdog.py
+    conv_watchdog.py               # crash/hang detector -- restarts the service if dead or stuck
+    conv_idle_check.py             # idle-timeout watchdog -- signals idle_close after 30min silence
     channel_duration_watchdog.py   # force-closes over-long agent-channel sessions
     recap_generator.py    # catch-up recap for returning conversation sessions
     home_stt.py           # speech-to-text

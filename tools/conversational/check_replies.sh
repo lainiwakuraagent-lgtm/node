@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # check_replies.sh — Check all owner reply channels and log new messages
 #
+# DEAD CODE, confirmed 2026-08-04: not invoked by any prompt or script in
+# the current architecture (no session-start flow calls it, despite the
+# docstring below). Superseded by telegram_watcher.py's persistent
+# long-poll design -- see ROADMAP.md's Open Questions table for the full
+# history. Left in place, not deleted.
+#
 # Checks:
 #   1. /home/andrii/reply.txt (file-based reply channel)
 #   2. Telegram webhook incoming (state/telegram_incoming.txt)

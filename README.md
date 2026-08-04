@@ -139,11 +139,11 @@ node/
 │   ├── nexus_watcher.py             # Nexus message polling — cross-agent seam
 │   ├── conversational/              # Owned by conversation.sh / voice_conversation.sh
 │   │   ├── telegram_send.sh         # Send Telegram message to owner
-│   │   ├── telegram_check.sh        # Check Telegram for new messages
-│   │   ├── telegram_watcher.py      # Telegram long-poll watcher
-│   │   ├── telegram_webhook_handler.py # Webhook-mode receiver
+│   │   ├── telegram_check.sh        # DEAD: pre-long-poll getUpdates fallback, superseded
+│   │   ├── telegram_watcher.py      # Telegram long-poll watcher (the active message path)
+│   │   ├── telegram_webhook_handler.py # DEAD: webhook-mode receiver, superseded by long-polling above
 │   │   ├── command_dispatcher.py    # Handle /commands from owner via Telegram
-│   │   ├── check_replies.sh         # Read incoming messages
+│   │   ├── check_replies.sh         # DEAD: session-start reply check, superseded by telegram_watcher.py
 │   │   ├── check_conv_status.sh     # Report conversation layer health
 │   │   ├── update_conv_budget.py    # Update context budget counters
 │   │   ├── home_stt.py              # Speech-to-text (Whisper local or API)

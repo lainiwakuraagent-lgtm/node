@@ -2,6 +2,14 @@
 """
 telegram_webhook_handler.py — Minimal Telegram webhook receiver.
 
+DEAD CODE, confirmed 2026-08-04: superseded by telegram_watcher.py's
+persistent long-poll design. Not launched by any systemd unit, and
+mechanically unable to receive anything even if started manually --
+conversation.sh actively deletes any registered webhook on every startup
+(a precondition for getUpdates long-polling, which Telegram's API treats
+as mutually exclusive with webhook delivery). Left in place, not deleted;
+see ROADMAP.md's Open Questions table for the full history.
+
 Runs an HTTP server on port 8765 that accepts Telegram webhook POSTs.
 Incoming messages are written to state/telegram_incoming.txt, one per line:
   YYYY-MM-DD HH:MM | @username | message text

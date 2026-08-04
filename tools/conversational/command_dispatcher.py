@@ -2,14 +2,15 @@
 """
 command_dispatcher.py — Handle Telegram /commands from the owner.
 
-Called by check_replies.sh when a Telegram message starts with '/'.
+Called by telegram_watcher.py's dispatch_command() when a Telegram message
+starts with '/' -- intercepted before it ever reaches the agent's own turn.
 Reads state files + Loom DB + session_log.csv to produce a formatted response,
 then the caller pipes the output to telegram_send.sh.
 
 Usage:
-  python3 tools/command_dispatcher.py "/status"
-  python3 tools/command_dispatcher.py "/log 10"
-  python3 tools/command_dispatcher.py "/control emergency on 15 urgent"
+  python3 tools/conversational/command_dispatcher.py "/status"
+  python3 tools/conversational/command_dispatcher.py "/log 10"
+  python3 tools/conversational/command_dispatcher.py "/control emergency on 15 urgent"
 
 Exit 0 always. Output is the response text for Telegram.
 
