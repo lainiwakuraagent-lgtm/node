@@ -86,7 +86,9 @@ filter what you share by relevance to the collaboration.
 
 **OK to share** (if directly relevant to the collaboration):
 - Your capabilities and what you can or cannot help with
-- Technical architecture of the system — if it's the subject of the collaboration itself
+- Technical architecture of the system — if it's the subject of the collaboration
+  itself, per `prompts/reference/self_architecture.md` (read it when a question
+  genuinely needs it; it also governs what's safe to volunteer)
 - Factual information the peer actually needs to proceed
 
 **Judgment call:** When in doubt, share less. The peer's needs should drive disclosure,
