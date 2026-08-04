@@ -37,12 +37,10 @@ but as a whole? Your job is verification, not new work.
 **Holds up** -- close it out:
 ```
 # Task:
-PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
-  --db ~/.local/share/loom/loom.db task edit <TASK_ID> -s done
+bin/loom task edit <TASK_ID> -s done
 
 # Goal:
-PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
-  --db ~/.local/share/loom/loom.db goal edit <GOAL_ID> -s done
+bin/loom goal edit <GOAL_ID> -s done
 ```
 For a goal audit that holds up, also write a closing note -- what the goal
 actually accomplished -- to `memory/latest_summary.md`.
@@ -52,8 +50,7 @@ for a goal, a follow-up project) describing exactly what's missing or broken
 (not "needs polish" -- name the actual gap), and leave the milestone_review
 task or review-status goal open until those close:
 ```
-PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
-  --db ~/.local/share/loom/loom.db task add -n "..." -D "..." -t bug
+bin/loom task add -n "..." -D "..." -t bug
 ```
 
 ## What NOT to produce

@@ -30,8 +30,7 @@ tasks with no project to organize under.
 
 For each proposed project:
 ```
-PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
-  --db ~/.local/share/loom/loom.db project add -n "..." -d "..." \
+bin/loom project add -n "..." -d "..." \
   --goal-id <GOAL_ID> --status desire
 ```
 Status is usually `desire` (needs its own evaluation) or `needs_plan` if it's

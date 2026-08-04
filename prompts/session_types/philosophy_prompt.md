@@ -130,7 +130,7 @@ This tier has one target: the blocked tasks. The queue is empty, but
 that status as a hypothesis, not a fact.
 
 **What to read first:**
-Run: `PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli --db ~/.local/share/loom/loom.db task list --status blocked_owner`
+Run: `bin/loom task list --status blocked_owner` (or: `bin/loom ls blocked_owner`)
 Then for each task listed, read its full description (`task show <id>`) —
 it should name the design doc's path directly if one exists, under that
 task's project folder (`memory/work/project_<id>/`) or goal folder

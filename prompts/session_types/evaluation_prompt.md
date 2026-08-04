@@ -39,13 +39,11 @@ to decide whether it's ready to move forward, not to start building it.
 session could turn it into concrete work:
 ```
 # Goal:
-PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
-  --db ~/.local/share/loom/loom.db goal edit <GOAL_ID> -s needs_plan
+bin/loom goal edit <GOAL_ID> -s needs_plan
 
 # Project — note: project edit has no short flag for status; -s means
 # --start-date there, not --status. Always spell it out for projects:
-PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
-  --db ~/.local/share/loom/loom.db project edit <PROJECT_ID> --status needs_plan
+bin/loom project edit <PROJECT_ID> --status needs_plan
 ```
 Also sketch what comes next so the planning session doesn't start from a blank
 page: for a goal, 2-4 candidate project names in `memory/work/goal_<ID>/`; for
@@ -59,8 +57,7 @@ the next evaluation session doesn't repeat this one from scratch.
 
 **Suspend** -- this shouldn't be pursued right now:
 ```
-PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
-  --db ~/.local/share/loom/loom.db goal edit <GOAL_ID> -s suspended
+bin/loom goal edit <GOAL_ID> -s suspended
 # or: project edit <PROJECT_ID> --status suspended
 ```
 State why, briefly, so a future session (or the owner) understands the

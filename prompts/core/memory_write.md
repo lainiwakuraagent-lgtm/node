@@ -77,11 +77,14 @@ and it comes before anything else once you've decided to stop.
    exists):
    ```
    LOOM_ID=$(cat state/current_loom_session_id.txt)
-   PYTHONPATH=~/lain/loom ~/lain/loom/.venv/bin/python -m loom.cli \
-     --db ~/.local/share/loom/loom.db \
-     session end --id "$LOOM_ID" --handoff "one-line next action"
+   bin/loom session end --id "$LOOM_ID" --handoff "one-line next action"
    ```
-   Closes the Loom session record and stores the handoff note.
+   Closes the Loom session record and stores the handoff note. Use the
+   per-agent `bin/loom` wrapper install.sh generates — never a hardcoded
+   `~/lain/loom` path. That path is specific to @Lain's own bare-metal
+   instance and doesn't exist on any other agent (Docker containers in
+   particular use a completely different layout: `/app/loom` + a per-agent
+   DB under `/home/agent/.local/share/loom/`).
 
 All artifact and work output files live in `memory/work/`. Create
 subdirectories there as needed. Never dump large outputs into the root of
