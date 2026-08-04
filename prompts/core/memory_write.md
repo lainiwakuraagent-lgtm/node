@@ -60,7 +60,14 @@ and it comes before anything else once you've decided to stop.
    ```
    So the conversational layer can surface it via `/report`. Non-fatal.
 
-7a. **Archive the session report to the FTS search index** (after step 7):
+7a. **Post telemetry to the fokacco-hp ingest endpoint** (T492/T493 — non-optional if METRICS_URL is configured):
+   ```
+   /usr/bin/python3 tools/executional/telemetry_report.py 2>/dev/null || true
+   ```
+   Reads METRICS_URL and METRICS_TOKEN from the environment. No-ops silently if either is absent.
+   Non-fatal — continue if it errors.
+
+7b. **Archive the session report to the FTS search index** (after step 7):
    ```
    /usr/bin/python3 tools/executional/report_archive.py index 2>/dev/null || true
    ```

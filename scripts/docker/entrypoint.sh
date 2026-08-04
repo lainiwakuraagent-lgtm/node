@@ -30,11 +30,22 @@ cd "$PROJECT_DIR"
 
 mkdir -p state/supervisor_channels.d logs
 
-echo "[entrypoint] Running install.sh (non-interactive, idempotent) ..."
-bash install.sh \
-  --non-interactive \
-  --i-know-this-is-the-template \
-  "$@"
+# Fix volume ownership: named volumes are created by Docker with root:root even
+# when the image user is agent. entrypoint.sh runs as root (PID 1 on first
+# start) so we can chown the volume mount points before dropping to agent.
+# This is a no-op on subsequent starts if already owned correctly.
+chown -R agent:agent \
+    /app/state /app/identity /app/memory /app/config \
+    /app/logs /app/prompts /app/inbox \
+    /home/agent 2>/dev/null || true
+
+echo "[entrypoint] Running install.sh as agent (non-interactive, idempotent) ..."
+su agent -c "
+  cd /app
+  bash install.sh \
+    --non-interactive \
+    --i-know-this-is-the-template
+"
 
 echo "[entrypoint] install.sh done. Handing off to supervisord."
 exec supervisord -c "${PROJECT_DIR}/scripts/docker/supervisord.conf"

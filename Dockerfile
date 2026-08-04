@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       nodejs \
       npm \
       sqlite3 \
+      procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI. Auth is deliberately NOT done at build time — it's
@@ -33,6 +34,13 @@ RUN npm install -g @anthropic-ai/claude-code
 # khal — same package install.sh's Step 8b would otherwise do per-container;
 # baking it here makes that step a fast per-agent-config-only pass at runtime.
 RUN pip install --no-cache-dir supervisor khal
+
+# Non-root agent user. Claude CLI refuses --dangerously-skip-permissions when
+# running as root — all supervised programs (claude, python scripts) must run
+# as a non-root uid. supervisord itself still starts as root (PID 1) so it can
+# bind to /tmp/supervisor.sock and fix volume ownership on start; individual
+# programs use user=agent in supervisord.conf.
+RUN useradd -m -u 1000 -s /bin/bash agent
 
 WORKDIR /app
 
@@ -47,6 +55,7 @@ RUN git clone --quiet https://github.com/lainiwakuraagent-lgtm/loom.git /app/loo
 # see .dockerignore).
 COPY . /app
 
-RUN chmod +x /app/scripts/docker/entrypoint.sh /app/install.sh
+RUN chmod +x /app/scripts/docker/entrypoint.sh /app/install.sh \
+    && chown -R agent:agent /app /home/agent
 
 ENTRYPOINT ["/app/scripts/docker/entrypoint.sh"]

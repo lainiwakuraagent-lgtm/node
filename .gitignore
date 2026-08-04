@@ -86,3 +86,7 @@ state/file_watch_state.json
 
 # sqlite-vec venv for vector search
 memory/work/.sqlite_vec_venv/
+
+# Test environment credentials — never commit
+.env.test
+.env.*.test

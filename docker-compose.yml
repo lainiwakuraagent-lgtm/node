@@ -68,8 +68,8 @@ services:
       - agent_logs:/app/logs
       - agent_prompts:/app/prompts
       - agent_inbox:/app/inbox
-      - agent_loom_db:/root/.local/share/loom
-      - agent_claude_auth:/root/.claude
+      - agent_loom_db:/home/agent/.local/share/loom
+      - agent_claude_auth:/home/agent/.claude
     deploy:
       resources:
         limits:

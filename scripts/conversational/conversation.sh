@@ -156,7 +156,7 @@ kill_stale_watcher() {
             fi
         fi
     done < <(pgrep -f "telegram_watcher.py" 2>/dev/null || true)
-    [ "$_killed_stray" = "1" ] && sleep 1
+    [ "$_killed_stray" = "1" ] && sleep 1 || true
 }
 
 # One-time startup sweep: kill any telegram_watcher orphans from prior conversation.sh runs.
@@ -181,7 +181,7 @@ while IFS= read -r _sw_pid; do
         fi
     fi
 done < <(pgrep -f "telegram_watcher.py" 2>/dev/null || true)
-[ "$_sw_killed" = "1" ] && sleep 1
+[ "$_sw_killed" = "1" ] && sleep 1 || true
 
 # --- Auto-restart loop ---
 RESTART_COUNT=0
