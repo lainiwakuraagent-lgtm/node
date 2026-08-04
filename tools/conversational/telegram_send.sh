@@ -74,9 +74,42 @@ if [[ -z "$MESSAGE" ]]; then
     exit 2
 fi
 
+CHAT_ACTION_SH="$SCRIPT_DIR/telegram_chat_action.sh"
+
+# A "typing…" indicator may be running (started by telegram_watcher.py when
+# the message that prompted this response arrived) — this is the actual
+# reply, so stop it now regardless of who's calling this script. Safe no-op
+# if nothing was running.
+[[ -f "$CHAT_ACTION_SH" ]] && bash "$CHAT_ACTION_SH" stop 2>/dev/null || true
+
+# Context-% footer: opt-in via WITH_CONTEXT_FOOTER=1, set by the agent's own
+# message-wait loop (see conversation.md) when sending an actual conversational
+# reply. Everything else that calls this script (watchdog alerts, the
+# restart-confirmation ping, digests) is system-generated and isn't running
+# inside a live session with meaningful context usage to report, so it stays
+# off by default rather than needing every other caller to opt out.
+DISPLAY_MESSAGE="$MESSAGE"
+if [[ "${WITH_CONTEXT_FOOTER:-0}" == "1" ]]; then
+    /usr/bin/python3 "$SCRIPT_DIR/update_conv_budget.py" > /dev/null 2>&1 || true
+    BUDGET_FILE="$PROJECT_DIR/state/conversation/context_budget.json"
+    PCT=""
+    if [[ -f "$BUDGET_FILE" ]]; then
+        PCT=$(/usr/bin/python3 -c "
+import json
+try:
+    print(json.load(open('$BUDGET_FILE')).get('estimated_context_pct', ''))
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
+    fi
+    if [[ -n "$PCT" ]]; then
+        DISPLAY_MESSAGE=$(printf '%s\n\n⚙ %s%%' "$MESSAGE" "$PCT")
+    fi
+fi
+
 RESPONSE=$($CURL -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
     --data-urlencode "chat_id=${CHAT_ID}" \
-    --data-urlencode "text=${MESSAGE}")
+    --data-urlencode "text=${DISPLAY_MESSAGE}")
 
 OK=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ok','false'))")
 if [[ "$OK" != "True" ]]; then
@@ -88,8 +121,12 @@ MSG_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin);
 echo "sent message_id=${MSG_ID}"
 
 # ── TTS (optional) ─────────────────────────────────────────────────────────────
+# Piped from $MESSAGE, not $DISPLAY_MESSAGE -- the context-% footer is a
+# Telegram-display detail, not something that should be read aloud.
 VOICE_MODE_FILE="$(dirname "$(dirname "${BASH_SOURCE[0]}")")/state/voice_mode.txt"
 FISH_TTS="$(dirname "${BASH_SOURCE[0]}")/fish_tts_send.sh"
 if [[ "${SKIP_TTS:-0}" != "1" && -f "$VOICE_MODE_FILE" && "$(cat "$VOICE_MODE_FILE" 2>/dev/null | tr -d '[:space:]')" == "on" && -f "$FISH_TTS" ]]; then
+    [[ -f "$CHAT_ACTION_SH" ]] && bash "$CHAT_ACTION_SH" start record_voice 2>/dev/null || true
     printf '%s' "$MESSAGE" | bash "$FISH_TTS" 2>/dev/null || true
+    [[ -f "$CHAT_ACTION_SH" ]] && bash "$CHAT_ACTION_SH" stop 2>/dev/null || true
 fi

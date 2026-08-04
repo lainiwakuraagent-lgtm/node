@@ -23,7 +23,7 @@ import pathlib
 
 PROJECT_DIR = pathlib.Path(__file__).parent.parent.parent
 BUDGET_FILE = PROJECT_DIR / "state" / "conversation" / "context_budget.json"
-CHECK_SESSION = PROJECT_DIR / "tools" / "check_session.sh"
+CHECK_SESSION = PROJECT_DIR / "tools" / "executional" / "check_session.sh"
 
 
 def get_context_pct() -> int:

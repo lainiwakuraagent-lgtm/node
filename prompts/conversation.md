@@ -54,9 +54,10 @@ session to place properly. Do not attempt to do it in this session.
    representation yet — proceed at a neutral default, don't treat that as an error.
    Read it as a current reading of the relationship, not a script to perform.
 4. Check `inbox/pending.json` — note any unprocessed items for awareness (do not process them)
-5. Check `state/conversation/context_budget.json` — initialize if missing
 
-Then start the message-wait loop below.
+Then start the message-wait loop below. `state/conversation/context_budget.json` is
+initialized automatically the first time `telegram_send.sh` sends a reply — nothing to
+do here for it.
 
 ---
 
@@ -101,28 +102,24 @@ crashes mid-close, the next watcher relaunch re-emits the signal and the system 
    prior session are not "last night" unless the dates actually confirm it. The `date` field
    is the Unix epoch form of the same timestamp; `datetime` is the human-readable version.
    For Nexus peer messages (`event: peer_message`), the `ts` field serves the same role.
-   Think. Respond.
+   Think. Respond — **keep it conversational**. This is a Telegram exchange, not a document:
+   short, direct replies read naturally here; long structured blocks (headers, bullet walls,
+   multi-paragraph explanations) don't. If something genuinely needs more room, say less up
+   front and offer to go deeper, rather than sending it all in one message.
 5a. **Track answered questions** — if the message you just received answers a question
     you previously sent (check `state/conversation/open_questions.json` for `status: open`
     entries), mark that entry's status as `answered`. Update the file.
-6. Update context budget, before sending: `python3 tools/conversational/update_conv_budget.py`.
-   This reads check_session.sh --context, increments message counters, and writes
-   state/conversation/context_budget.json. Read `estimated_context_pct` back out — you'll
-   use it in the next step. There's no auto-close on context — this is purely visibility,
-   so Andrii can see it and `/reset` himself if he wants to.
-7. Send the response with the context percentage appended as a short footer on its own
-   line — response text, blank line, then `⚙ <pct>%`. Pipe the combined text through
-   `bash tools/conversational/telegram_send.sh` as usual. Keep the footer terse — just the
-   glyph and the number, nothing else. Store the clean response text (without the footer)
-   in thread.json in the next step; the footer is Telegram-display-only, not part of the
-   conversational record.
-8. Update `state/conversation/thread.json` (append both turns, including `datetime` string
+6. Send the response: `printf '%s' "response" | WITH_CONTEXT_FOOTER=1 bash tools/conversational/telegram_send.sh`.
+   The script handles everything else itself now — stops the "typing…" indicator, computes
+   the current context % and appends it as a footer on the Telegram-visible copy only, sends
+   it. You don't compute or format any of that; just send the clean response text.
+7. Update `state/conversation/thread.json` (append both turns, including `datetime` string
    for time orientation in future sessions — format: `"datetime": "2026-07-29T10:30:00+00:00"`)
-9. **[Fallback signal check]** The watcher handles signals structurally (step 4 above).
+8. **[Fallback signal check]** The watcher handles signals structurally (step 4 above).
    This step is a belt-and-suspenders check for edge cases (watcher crash, signal written
    between poll cycles). If `state/conversation/reset_signal.txt` exists at this point:
    handle it per the Signal handling section above. This should rarely fire.
-10. Loop from step 1
+9. Loop from step 1
 
 ---
 

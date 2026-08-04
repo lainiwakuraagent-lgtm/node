@@ -42,6 +42,7 @@ LAST_UPDATE_FILE = PROJECT_DIR / "state" / "conversation" / "last_update_id.txt"
 WATCHER_PID_FILE = PROJECT_DIR / "state" / "conversation" / "watcher.pid"
 OUTBOX_FILE = PROJECT_DIR / "state" / "conversation" / "outbox.json"
 LAST_REAL_MSG_FILE = PROJECT_DIR / "state" / "conversation" / "last_real_message_at.txt"
+CHAT_ACTION_SH = PROJECT_DIR / "tools" / "conversational" / "telegram_chat_action.sh"
 
 # Long-poll timeout (seconds). Telegram holds the connection open for this long
 # if there are no updates. Shorter = more reconnects; longer = more blocking.
@@ -475,10 +476,20 @@ def main() -> int:
                 continue  # keep polling — don't emit to agent, don't exit
 
             # Found a message for us — record it for conv_idle_check.py's idle
-            # timer, then print and exit.
+            # timer, start the "typing…" indicator for the thinking time about
+            # to happen (telegram_send.sh stops it right before actually
+            # sending), then print and exit.
             try:
                 LAST_REAL_MSG_FILE.parent.mkdir(parents=True, exist_ok=True)
                 LAST_REAL_MSG_FILE.write_text(str(int(time.time())))
+            except OSError:
+                pass
+
+            try:
+                subprocess.Popen(
+                    ["bash", str(CHAT_ACTION_SH), "start", "typing"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
             except OSError:
                 pass
 

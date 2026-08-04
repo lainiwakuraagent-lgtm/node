@@ -87,6 +87,24 @@ if [ -z "$TEXT" ]; then
     exit 1
 fi
 
+# ── Optional text filter, before synthesis ─────────────────────────────────
+# Configurable hook for trimming/rewriting text before it reaches the TTS
+# engine -- e.g. stripping emoji, which read aloud as nonsense words. Off by
+# default (nothing happens, TEXT passes through unchanged) -- set
+# TTS_TEXT_FILTER (env var, or in $ENV_FILE) to a script path to enable one.
+# See tts_filters/strip_emoji.sh for a ready-made example.
+TTS_TEXT_FILTER="${TTS_TEXT_FILTER:-$(load_env_var "TTS_TEXT_FILTER")}"
+if [ -n "$TTS_TEXT_FILTER" ]; then
+    case "$TTS_TEXT_FILTER" in
+        /*) FILTER_PATH="$TTS_TEXT_FILTER" ;;
+        *) FILTER_PATH="$PROJECT_DIR/$TTS_TEXT_FILTER" ;;
+    esac
+    if [ -f "$FILTER_PATH" ]; then
+        FILTERED_TEXT=$(printf '%s' "$TEXT" | bash "$FILTER_PATH" 2>/dev/null || echo "$TEXT")
+        [ -n "$FILTERED_TEXT" ] && TEXT="$FILTERED_TEXT"
+    fi
+fi
+
 # ── Call Fish Audio TTS API ───────────────────────────────────────────────
 
 AUDIO_FILE="/tmp/fish_tts_$$.${FORMAT}"

@@ -525,6 +525,15 @@ def cmd_new():
     (CONV_STATE_DIR / "exit_reason.txt").write_text("new")
     (CONV_STATE_DIR / "reset_signal.txt").unlink(missing_ok=True)
 
+    # A "typing…" indicator may be running for the session being killed —
+    # stop it now rather than leaving it blinking until its safety cap expires.
+    chat_action_sh = PROJECT_DIR / "tools" / "conversational" / "telegram_chat_action.sh"
+    try:
+        subprocess.run(["bash", str(chat_action_sh), "stop"], timeout=5,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
     pid_path = CONV_STATE_DIR / "claude.pid"
     if pid_path.exists():
         try:
