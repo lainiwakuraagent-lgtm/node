@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # procctl.sh — Process control shim.
 #
-# Routes start/stop/is-active/restart/list-units calls to the active backend.
+# Routes process-control calls to the active backend.
 # Backend is set by PROCESS_BACKEND in state/agent_config.env; auto-detected
 # as "systemd" if systemctl --user responds, else "supervisord".
 #
@@ -15,6 +15,10 @@
 #   stop <unit>                           stop the unit
 #   restart <unit>                        restart the unit
 #   list-units <pattern> [flags...]       list active matching units as JSON
+#   enable <unit>                         enable unit (supervisord: no-op)
+#   disable <unit>                        disable unit (supervisord: no-op)
+#   is-enabled <unit>                     exit 0 if enabled (supervisord: checks if known)
+#   daemon-reload                         reload unit definitions (supervisord: update)
 #
 # systemd backend: transparent pass-through to "systemctl --user "$@"".
 #
@@ -207,6 +211,34 @@ case "${VERB}" in
         JOINED="$(printf '%s,' "${JSON_UNITS[@]}")"
         echo "[${JOINED%,}]"
     fi
+    ;;
+
+  enable)
+    # supervisord has no runtime enable — programs are declared via conf files.
+    # No-op so callers can route through procctl without a per-backend guard.
+    :
+    ;;
+
+  disable)
+    # supervisord: no-op (see enable).
+    :
+    ;;
+
+  is-enabled)
+    # supervisord: "enabled" if the program is known, "disabled" otherwise.
+    PROG="$(_unit_to_prog "${1:-}")"
+    if _prog_unknown "${PROG}"; then
+        echo "disabled"
+        exit 1
+    else
+        echo "enabled"
+        exit 0
+    fi
+    ;;
+
+  daemon-reload)
+    # supervisord: reload configuration from disk.
+    supervisorctl update
     ;;
 
   *)

@@ -30,6 +30,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="$PROJECT_DIR/state"
 SCRIPTS_DIR="$PROJECT_DIR/scripts"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+PROCCTL_SH="$PROJECT_DIR/tools/executional/procctl.sh"
 EMERGENCY_FLAG="$STATE_DIR/emergency_mode.active"
 EMERGENCY_META="$STATE_DIR/emergency_mode.json"
 INSTANCE="$(basename "$PROJECT_DIR")"
@@ -125,15 +126,11 @@ EOF
     || echo "[WARN] Could not enable linger (may already be enabled or requires sudo)"
 
   # 4. Reload and start the timer.
-  _uid="$(id -u)"
-  export XDG_RUNTIME_DIR="/run/user/${_uid}"
-  export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${_uid}/bus"
-
-  systemctl --user daemon-reload
+  bash "${PROCCTL_SH}" daemon-reload
   echo "[OK] systemd user daemon reloaded"
 
-  systemctl --user enable "$TIMER_UNIT"
-  systemctl --user start "$TIMER_UNIT"
+  bash "${PROCCTL_SH}" enable "$TIMER_UNIT"
+  bash "${PROCCTL_SH}" start "$TIMER_UNIT"
   echo "[OK] $TIMER_UNIT enabled and started"
 
   echo ""
@@ -174,19 +171,15 @@ elif [ "$ACTION" = "off" ]; then
   fi
 
   # 1. Stop and disable the timer.
-  _uid="$(id -u)"
-  export XDG_RUNTIME_DIR="/run/user/${_uid}"
-  export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${_uid}/bus"
-
-  if systemctl --user is-active "$TIMER_UNIT" &>/dev/null; then
-    systemctl --user stop "$TIMER_UNIT"
+  if bash "${PROCCTL_SH}" is-active "$TIMER_UNIT" &>/dev/null; then
+    bash "${PROCCTL_SH}" stop "$TIMER_UNIT"
     echo "[OK] $TIMER_UNIT stopped"
   else
     echo "[--] $TIMER_UNIT was not running"
   fi
 
-  if systemctl --user is-enabled "$TIMER_UNIT" &>/dev/null; then
-    systemctl --user disable "$TIMER_UNIT"
+  if bash "${PROCCTL_SH}" is-enabled "$TIMER_UNIT" &>/dev/null; then
+    bash "${PROCCTL_SH}" disable "$TIMER_UNIT"
     echo "[OK] $TIMER_UNIT disabled"
   fi
 
@@ -194,7 +187,7 @@ elif [ "$ACTION" = "off" ]; then
   rm -f "$SYSTEMD_USER_DIR/${TIMER_UNIT}" "$SYSTEMD_USER_DIR/emergency-agent@.service"
   echo "[OK] Systemd unit files removed"
 
-  systemctl --user daemon-reload
+  bash "${PROCCTL_SH}" daemon-reload
   echo "[OK] systemd user daemon reloaded"
 
   # 3. Remove the emergency flag.

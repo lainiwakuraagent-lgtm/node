@@ -45,6 +45,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+PROCCTL = Path(__file__).resolve().parent / "procctl.sh"
+
 
 def parse_args():
     p = argparse.ArgumentParser(description="Schedule one-off agent sessions via systemd")
@@ -94,7 +96,7 @@ def is_timer_active(unit_name: str) -> bool:
     """Check if a transient systemd user timer exists."""
     try:
         result = subprocess.run(
-            ["systemctl", "--user", "is-active", f"{unit_name}.timer"],
+            [str(PROCCTL), "is-active", f"{unit_name}.timer"],
             capture_output=True, text=True
         )
         return result.returncode == 0
@@ -212,7 +214,7 @@ def clear_expired(schedule: dict, project_dir: Path, dry_run: bool):
             continue
         try:
             subprocess.run(
-                ["systemctl", "--user", "stop", f"{unit_name}.timer"],
+                [str(PROCCTL), "stop", f"{unit_name}.timer"],
                 capture_output=True
             )
             print(f"  STOPPED: '{unit_name}' ({label})")
