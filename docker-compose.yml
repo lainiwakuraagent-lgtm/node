@@ -55,6 +55,11 @@ services:
       PERSONA_NAME: ${PERSONA_NAME:-}
       PERSONA_BACKGROUND: ${PERSONA_BACKGROUND:-}
       PERSONA_DESCRIPTION: ${PERSONA_DESCRIPTION:-}
+      # Telemetry (T492/T493): set METRICS_URL to the fokacco-hp ingest endpoint
+      # (https://<node>.ts.net/ingest). METRICS_TOKEN must match a line in
+      # fokacco-hp:state/ingest_tokens.txt. Both are optional — absent → no-op.
+      METRICS_URL: ${METRICS_URL:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     volumes:
       - agent_state:/app/state
       - agent_identity:/app/identity
