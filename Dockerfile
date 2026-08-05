@@ -34,6 +34,11 @@ RUN npm install -g @anthropic-ai/claude-code
 # khal — same package install.sh's Step 8b would otherwise do per-container;
 # baking it here makes that step a fast per-agent-config-only pass at runtime.
 RUN pip install --no-cache-dir supervisor khal
+# supervisorctl defaults to /etc/supervisor/supervisord.conf when called without
+# -c. Symlinking our config there means `docker exec <c> supervisorctl status`
+# works without passing the config path explicitly.
+RUN mkdir -p /etc/supervisor && \
+    ln -sf /app/scripts/docker/supervisord.conf /etc/supervisor/supervisord.conf
 
 # Non-root agent user. Claude CLI refuses --dangerously-skip-permissions when
 # running as root — all supervised programs (claude, python scripts) must run
