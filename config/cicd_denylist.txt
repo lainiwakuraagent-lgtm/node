@@ -1,0 +1,40 @@
+# cicd_denylist.txt — Canonical base denylist for blank_node CI/CD sync
+#
+# Format: one pattern per line, gitignore-style glob semantics.
+#   - Leading / anchors the pattern to the agent root.
+#   - Trailing / matches any path under that directory (directory pattern).
+#   - # starts a comment line.
+#   - Empty lines are ignored.
+#
+# This file lives in blank_node and is the FLOOR: every agent that has
+# CI_CD_ENABLED=true enforces this list unconditionally. Agents may add
+# their own extra exclusions in state/cicd_denylist.local.txt (§f of the
+# CI/CD revival plan). The effective denylist is always base ∪ local —
+# the local file can extend but never narrow the base list.
+#
+# Changes to this file are a visible diff in blank_node's git history.
+# Never silently expand or contract the exclusion scope.
+
+# Agent identity and knowledge — never overwritten
+memory/
+identity/
+state/
+logs/
+inbox/
+loom/
+
+# Agent config (per-agent parameterization — explicit even though state/ covers it)
+state/agent_config.env
+
+# Prompts — excluded per Andrii's explicit decision (2026-08-04).
+# Prompt updates go through deliberate agent consideration, not blind sync.
+# Agents that want framework prompt updates to sync automatically can narrow
+# this to prompts/persona.txt and prompts/goal.txt only, as a local override.
+prompts/
+
+# Git internals
+.git/
+
+# Loom DB (per-agent, per T400 decision).
+# The DB path is per agent — the DB itself is state, never template.
+# LOOM_DB is in the loom/ directory, already covered by loom/ above.

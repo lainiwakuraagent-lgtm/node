@@ -73,6 +73,12 @@ os.replace(tmp, out_path)
     "$STATE_DIR/manual_trigger_result.json" 2>/dev/null || true
 }
 
+# --- CI/CD template sync (non-fatal, before lock) ---
+# Runs only if CI_CD_ENABLED=true in agent_config.env. @Lain is hardcoded false.
+# Placed here: agent_config.env is sourced (CI_CD_ENABLED available), LOG_DIR
+# exists, and the lock is not yet held (slow fetch should not block other gates).
+bash "$PROJECT_DIR/scripts/executional/node_sync.sh" 2>/dev/null || true
+
 # --- Gate 0: single-instance lock (all modes) — acquired FIRST, before any ---
 # state mutation below (night-reset, philosophy cap, Loom writes). Previously
 # this lock was only checked-then-written right before the `claude` launch,

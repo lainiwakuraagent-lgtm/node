@@ -469,6 +469,48 @@ _init_file "${INSTALL_ROOT}/state/sessions_manual.count" "0"
 _init_file "${INSTALL_ROOT}/state/sessions_tonight.date" "$(date +%Y-%m-%d)"
 _init_file "${INSTALL_ROOT}/state/trigger_mode.txt" "manual"
 
+# ── CI/CD local denylist ──────────────────────────────────────────────────────
+# Create state/cicd_denylist.local.txt — empty (header comment only).
+# This file is the per-agent tier of the two-tier denylist (§f of the CI/CD revival plan).
+# It can only EXTEND the base denylist (config/cicd_denylist.txt), never narrow it.
+# Lives in state/ so it is automatically protected by the base denylist itself.
+_LOCAL_DENYLIST="${INSTALL_ROOT}/state/cicd_denylist.local.txt"
+_LOCAL_DENYLIST_CONTENT='# cicd_denylist.local.txt — Per-agent local CI/CD sync exclusions
+#
+# Format: same as config/cicd_denylist.txt (gitignore-style globs, one per line, # for comments).
+# This file is ADDITIVE ONLY: it extends the base denylist in config/cicd_denylist.txt.
+# The effective denylist enforced by node_sync.sh is: base UNION local.
+# You cannot narrow the base list from here — only add agent-specific exclusions on top.
+#
+# Add patterns here for files this agent has deliberately customized and wants to
+# protect from blank_node template syncs. Do NOT copy the base list here — starting
+# empty avoids drift-shadowing ambiguity when the base list changes later.
+#
+# This file lives in state/ (already in the base denylist), so node_sync.sh can never
+# overwrite the file that controls what node_sync.sh is allowed to overwrite.'
+
+if [ "$REMOTE" = "1" ]; then
+  if [ "$DRY_RUN" = "1" ]; then
+    dry "[ -f '${_LOCAL_DENYLIST}' ] || write header-only state/cicd_denylist.local.txt"
+  else
+    # Check first so we don't overwrite an agent's existing local denylist
+    if ! ssh_run "[ -f '${_LOCAL_DENYLIST}' ]" 2>/dev/null; then
+      ssh_run "cat > '${_LOCAL_DENYLIST}'" <<< "${_LOCAL_DENYLIST_CONTENT}"
+      info "Initialized (remote): state/cicd_denylist.local.txt"
+    fi
+  fi
+else
+  if [ ! -f "${_LOCAL_DENYLIST}" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+      dry "Write header-only state/cicd_denylist.local.txt"
+    else
+      printf '%s\n' "${_LOCAL_DENYLIST_CONTENT}" > "${_LOCAL_DENYLIST}"
+      info "Initialized: state/cicd_denylist.local.txt"
+    fi
+  fi
+fi
+unset _LOCAL_DENYLIST _LOCAL_DENYLIST_CONTENT
+
 if [ "$REMOTE" = "1" ]; then
   [ "$DRY_RUN" = "1" ] \
     && dry "[ -f '${INSTALL_ROOT}/inbox/pending.json' ] || echo '[]' > '${INSTALL_ROOT}/inbox/pending.json'" \
@@ -1440,6 +1482,7 @@ else
   _smoke_check "state/agent_config.env"              "${INSTALL_ROOT}/state/agent_config.env"
   _smoke_check "bin/loom wrapper"                    "${INSTALL_ROOT}/bin/loom"
   _smoke_check "inbox/pending.json"                  "${INSTALL_ROOT}/inbox/pending.json"
+  _smoke_check "state/cicd_denylist.local.txt"       "${INSTALL_ROOT}/state/cicd_denylist.local.txt"
   if [ "$SKIP_KHAL" = "0" ]; then
     _smoke_check "config/khal.cfg"                   "${INSTALL_ROOT}/config/khal.cfg"
     _smoke_check "bin/khal wrapper"                  "${INSTALL_ROOT}/bin/khal"
