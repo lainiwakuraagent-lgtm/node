@@ -60,6 +60,10 @@ services:
       # fokacco-hp:state/ingest_tokens.txt. Both are optional — absent → no-op.
       METRICS_URL: ${METRICS_URL:-}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # Conversational layer tuning. Default: 1800s (30 min). Override in .env.test
+      # with 120 for faster idle-close testing. Propagated to supervisord so
+      # %(ENV_CONV_IDLE_THRESHOLD_SECONDS)s in supervisord.conf can expand.
+      CONV_IDLE_THRESHOLD_SECONDS: ${CONV_IDLE_THRESHOLD_SECONDS:-1800}
     volumes:
       - agent_state:/app/state
       - agent_identity:/app/identity
