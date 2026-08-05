@@ -1,0 +1,26 @@
+# ci/managed_paths.txt — self_update.sh allowlist
+#
+# This file controls which paths the pull-based self-update mechanism
+# (scripts/self_update.sh) is permitted to touch. One glob/path per line.
+# Blank lines and lines beginning with # are ignored.
+#
+# Rules:
+#   - Only paths listed here can be pulled from upstream blank_node.
+#   - Per-node exclusions can be added in state/self_update_exclude.txt
+#     (never lives here — it's node-specific and carries live state).
+#   - Wildcards use fnmatch-style globs (e.g. *.sh matches in that dir only).
+#   - NEVER add: state/, identity/, memory/, prompts/persona.txt,
+#     config/session_schedule.json, inbox/ — these carry live agent data.
+
+# Executional scripts (session launcher, maintenance, session type dispatcher)
+scripts/executional/*.sh
+scripts/executional/*.py
+
+# Generic tool modules shared across nodes
+tools/*/*.py
+
+# Session type prompt templates (not persona — persona is per-node)
+prompts/session_types/*.md
+
+# Bootstrap installer
+install.sh
