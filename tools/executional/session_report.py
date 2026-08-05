@@ -176,11 +176,70 @@ def format_timestamp(ts: str) -> str:
         return ts[:16]
 
 
+def read_self_update_log(log_path: Path) -> dict | None:
+    """Parse the latest self_update run from logs/self_update.log.
+
+    Returns a dict with keys: status, files_pulled, files_skipped, commit_hash.
+    Returns None if the log is absent or unreadable.
+    """
+    if not log_path.exists():
+        return None
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if not text.strip():
+        return None
+
+    # Find the last summary block
+    marker = "=== self_update summary ==="
+    end_marker = "==========================="
+    last_start = text.rfind(marker)
+
+    if last_start == -1:
+        # No summary block — check for disabled/no-op message
+        lines = text.splitlines()
+        for line in reversed(lines):
+            if "disabled" in line or "no-op" in line:
+                return {"status": "disabled", "files_pulled": [], "files_skipped": [], "commit_hash": ""}
+        return {"status": "unknown", "files_pulled": [], "files_skipped": [], "commit_hash": ""}
+
+    block_text = text[last_start:]
+    end_pos = block_text.find(end_marker)
+    if end_pos != -1:
+        block_text = block_text[:end_pos + len(end_marker)]
+
+    result: dict = {"status": "ok", "files_pulled": [], "files_skipped": [], "commit_hash": ""}
+    lines = block_text.splitlines()
+    mode = None
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("files_pulled:"):
+            mode = "pulled"
+            count_str = stripped.split(":", 1)[1].strip()
+            result["files_pulled_count"] = int(count_str) if count_str.isdigit() else 0
+        elif stripped.startswith("files_skipped_by_exclude:"):
+            mode = "skipped"
+            count_str = stripped.split(":", 1)[1].strip()
+            result["files_skipped_count"] = int(count_str) if count_str.isdigit() else 0
+        elif stripped.startswith("commit_hash:"):
+            mode = None
+            result["commit_hash"] = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("==="):
+            mode = None
+        elif mode == "pulled" and stripped:
+            result["files_pulled"].append(stripped)
+        elif mode == "skipped" and stripped:
+            result["files_skipped"].append(stripped)
+    return result
+
+
 def generate_report(n_sessions: int = 3) -> str:
     """Generate the full session report."""
     summary_path = PROJECT_DIR / "memory" / "latest_summary.md"
     csv_path = PROJECT_DIR / "logs" / "session_log.csv"
     sessions_dir = PROJECT_DIR / "memory" / "sessions"
+    self_update_log = PROJECT_DIR / "logs" / "self_update.log"
 
     now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
     hot_state = read_hot_state(summary_path)
@@ -188,6 +247,7 @@ def generate_report(n_sessions: int = 3) -> str:
     next_action = read_next_action(summary_path)
     csv_rows = read_csv_sessions(csv_path, n_sessions)
     session_files = find_session_files(sessions_dir, n_sessions)
+    self_update = read_self_update_log(self_update_log)
 
     lines = [
         f"# Session Report — {AGENT_TAG}",
@@ -247,6 +307,31 @@ def generate_report(n_sessions: int = 3) -> str:
             lines.append("- Key findings:")
             for item in info["findings"][:3]:
                 lines.append(f"  - {item}")
+        lines.append("")
+
+    # Maintenance — self_update section (non-breaking if log absent)
+    if self_update is not None:
+        lines += ["---", "", "## Maintenance — Self-update", ""]
+        status = self_update.get("status", "unknown")
+        if status == "disabled":
+            lines.append("Self-update: disabled (SELF_UPDATE_ENABLED not set — no-op)")
+        elif status == "ok":
+            pulled = self_update.get("files_pulled", [])
+            skipped = self_update.get("files_skipped", [])
+            commit = self_update.get("commit_hash", "")
+            if pulled:
+                lines.append(f"Files pulled: {len(pulled)}")
+                for f in pulled:
+                    lines.append(f"  - {f}")
+            else:
+                lines.append("Files pulled: 0 (already up to date)")
+            if skipped:
+                lines.append(f"Files skipped by exclude list: {len(skipped)}")
+                for f in skipped:
+                    lines.append(f"  - {f}")
+            lines.append(f"Commit: {commit or '(no changes)'}")
+        else:
+            lines.append(f"Self-update: {status}")
         lines.append("")
 
     lines += [
