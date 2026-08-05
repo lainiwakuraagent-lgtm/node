@@ -2,7 +2,8 @@
 # node_sync.sh — Pull-based CI/CD sync from blank_node template.
 # Called non-fatally by wake.sh after agent_config.env is sourced.
 # CI_CD_ENABLED from agent_config.env controls whether sync runs.
-# Remote-clone support for off-machine agents is a deferred follow-up task.
+# BLANK_NODE_REPO: if set, auto-clones the template on first run when
+# BLANK_NODE_DIR doesn't exist — enables off-machine agents (T515).
 
 set -uo pipefail
 
@@ -33,8 +34,19 @@ if [ "$BLANK_NODE_DIR" -ef "$PROJECT_DIR" ] 2>/dev/null || [ "$(realpath "$BLANK
   exit 0
 fi
 if [ ! -d "$BLANK_NODE_DIR/.git" ]; then
-  log "ERROR: BLANK_NODE_DIR=$BLANK_NODE_DIR is not a git repo — skip."
-  exit 0
+  BLANK_NODE_REPO="${BLANK_NODE_REPO:-}"
+  if [ -n "$BLANK_NODE_REPO" ]; then
+    log "BLANK_NODE_DIR has no .git — cloning from $BLANK_NODE_REPO..."
+    mkdir -p "$(dirname "$BLANK_NODE_DIR")"
+    if ! timeout 120 git clone --depth 1 "$BLANK_NODE_REPO" "$BLANK_NODE_DIR" >> "$LOG_FILE" 2>&1; then
+      log "ERROR: git clone failed — cannot bootstrap BLANK_NODE_DIR. CI/CD skip."
+      exit 0
+    fi
+    log "Clone complete: $BLANK_NODE_DIR"
+  else
+    log "ERROR: BLANK_NODE_DIR=$BLANK_NODE_DIR is not a git repo and BLANK_NODE_REPO is not set — skip."
+    exit 0
+  fi
 fi
 
 # ── Fetch upstream ────────────────────────────────────────────────────────────
