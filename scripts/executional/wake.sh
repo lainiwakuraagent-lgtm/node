@@ -357,7 +357,7 @@ session_prompt=$(mktemp "$STATE_DIR/session_prompt.XXXXXX.md")
 # and a second, broken copy in interactive.sh (`status='active'`, a value
 # that can never be set).
 LOOM_CONTEXT_FILE="$STATE_DIR/loom_context.json"
-LOOM_SRC="${HOME}/lain/loom"
+LOOM_SRC="${LOOM_SRC:-${HOME}/lain/loom}"
 LOOM_DB="${LOOM_DB:-${HOME}/.local/share/loom/loom.db}"
 export LOOM_DB
 LOOM_SESSION_ROW_ID=""
