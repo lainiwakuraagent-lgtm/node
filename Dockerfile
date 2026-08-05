@@ -50,6 +50,9 @@ WORKDIR /app
 RUN git clone --quiet https://github.com/lainiwakuraagent-lgtm/loom.git /app/loom \
     && python3 -m venv /app/loom/.venv \
     && /app/loom/.venv/bin/pip install --no-cache-dir -e /app/loom
+# Tell wake.sh where loom lives in this container. Without this, wake.sh defaults
+# to ~/lain/loom which resolves to /root/lain/loom (missing) in Docker.
+ENV LOOM_SRC=/app/loom
 
 # Application code (.git, secrets, and runtime-generated state excluded —
 # see .dockerignore).
