@@ -14,7 +14,7 @@ Priority order:
      - reflection:  always return "reflection" (or "philosophy")
   3. Loom queue state (DB-driven algorithmic selection) — used when
      WINDOW_TYPE is "work" or unset (emergency/manual mode)
-  4. default: "philosophy" (empty queue → identity/relationship session)
+  4. default: philosophy cap (if consec >= 3) or "philosophy" (empty queue)
 
 Queue-state rules (priority 3, within work windows):
   - desire-status goals/projects, not blocked -> evaluation
@@ -356,32 +356,6 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
         return reflection_type, "window_type", "", None
     # window_type == "work" or unset: fall through to queue-state logic
 
-    # Priority 2.5: Philosophy cap gate — must run BEFORE queue-state check.
-    # See agent_project's resolve_session_type.py for detailed rationale.
-    # Short version: philosophy_blocker-created tasks must not immediately
-    # trigger execution and reset the consecutive counter, bypassing the cap.
-    #
-    # Staleness check: an already-active cap (state/philosophy_cap.active
-    # exists) is only honored if nothing has changed since it was set. Any
-    # Loom row or inbox entry updated *after* the cap's own timestamp counts
-    # as genuinely new information and clears it. This is what keeps the
-    # anti-gaming rule above intact: a task created by the blocker-resolution
-    # session that pushed the counter to 3 necessarily has an updated_at from
-    # *before* the cap file exists (the flag is only written on the *next*
-    # wake, once consec is already >= 3 going in) — so it can never clear its
-    # own cap. Only activity after that point can. Without this, the cap had
-    # no reset path at all outside TRIGGER_MODE=nightly's new-night check —
-    # emergency/manual mode could deadlock indefinitely once capped.
-    default_goal_id = _read_default_goal_id(project_dir)
-    _cap_target = {"level": "goal", "id": default_goal_id} if default_goal_id else None
-    consec = _read_consecutive_philosophy_count(project_dir)
-    if consec >= 3:
-        cap_ts = _read_cap_active_timestamp(project_dir)
-        if cap_ts is None or not _cap_is_stale(project_dir, db_path, cap_ts):
-            return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached", _cap_target
-        _clear_philosophy_cap(project_dir)
-        consec = 0
-
     # Priority 3: Queue state from Loom DB
     queue_type, queue_reason, target = resolve_from_queue_state(db_path)
     if queue_type:
@@ -407,26 +381,24 @@ def resolve_type(project_dir: Path, trigger_mode: str, db_path: Path) -> tuple:
             f"maintenance overdue: {_days_since_maint:.1f}d >= {_maintenance_interval:.0f}d threshold", None
 
     # Priority 4: default — nothing eligible anywhere (no goal, project, or task
-    # matched any rule above) means a philosophy session. Which of the three
-    # escalating tiers runs is a scope-file concern (load_type_config(),
-    # mirroring maintenance's own scope_rotation) rather than a separate
-    # top-level type — consecutive_philosophy_count already carries the tier,
-    # forking the type id (the old creative/blocker_resolver split) just
-    # duplicates that information and risks drifting out of sync with it, as
-    # happened when those types' config/prompt files were consolidated away.
+    # matched any rule above). Philosophy cap lives here, checked last, so it
+    # can never block real queue work. A pre-existing scheduled task now
+    # preempts the cap via Priority 3 above — the stall caused by the old
+    # Priority 2.5 placement (before the Loom DB was ever consulted) cannot
+    # recur.
     #
     # If a default goal is configured for this node (DEFAULT_GOAL_ID in
     # state/agent_config.env), attach it as target so main()'s existing
-    # target_context machinery (built for rules 1-3) picks it up for free and
-    # injects its content as framing — no new session type, no new injection
-    # path. Looked up by id directly, not gated by status: the default goal is
-    # a carve-out from the normal Goal status table (never evaluated, planned,
-    # or audited), so it must resolve here even if its status is desire or
-    # anything else. philosophy_cap aborts before consuming target_context
-    # anyway, so attaching it there too is harmless.
-    target = _cap_target  # reuse — already computed above
-    tier = consec + 1  # consec is 0/1/2 here — >=3 already returned above
-    return "philosophy", "default", f"consecutive_philosophy_count={consec}, tier {tier}", target
+    # target_context machinery picks it up for free and injects its content as
+    # framing — philosophy_cap aborts before consuming target_context, so
+    # attaching it there too is harmless.
+    default_goal_id = _read_default_goal_id(project_dir)
+    _cap_target = {"level": "goal", "id": default_goal_id} if default_goal_id else None
+    consec = _read_consecutive_philosophy_count(project_dir)
+    if consec >= 3:
+        return "philosophy_cap", "default", f"consecutive_philosophy_count={consec} >= 3, cap reached", _cap_target
+    tier = consec + 1  # consec is 0/1/2 here
+    return "philosophy", "default", f"consecutive_philosophy_count={consec}, tier {tier}", _cap_target
 
 
 def _read_default_goal_id(project_dir: Path) -> Optional[int]:
@@ -461,96 +433,6 @@ def _read_consecutive_philosophy_count(project_dir: Path) -> int:
         return max(0, int(count_file.read_text(encoding="utf-8").strip()))
     except (FileNotFoundError, ValueError, OSError):
         return 0
-
-
-def _read_cap_active_timestamp(project_dir: Path) -> Optional[float]:
-    """Read the epoch timestamp state/philosophy_cap.active was written with.
-
-    None means the cap hasn't actually been activated by a prior wake yet
-    (resolve_type()'s Priority 2.5 still returns philosophy_cap in that case,
-    same as before this staleness check existed — wake.sh writes the file the
-    first time a session resolves to philosophy_cap).
-    """
-    cap_file = project_dir / "state" / "philosophy_cap.active"
-    try:
-        return float(cap_file.read_text(encoding="utf-8").strip())
-    except (FileNotFoundError, ValueError, OSError):
-        return None
-
-
-def _clear_philosophy_cap(project_dir: Path) -> None:
-    """Reset the philosophy escalation ladder when an active cap is found
-    stale. Mirrors what wake.sh's own new-night reset already does to the
-    same three files, so a stale cap doesn't wait for a full night rollover
-    to clear on its own."""
-    state_dir = project_dir / "state"
-    for name in ("philosophy_cap.active", "philosophy_cap_notified_at.txt"):
-        try:
-            (state_dir / name).unlink(missing_ok=True)
-        except OSError:
-            pass
-    try:
-        (state_dir / "consecutive_philosophy.count").write_text("0", encoding="utf-8")
-    except OSError:
-        pass
-
-
-def _cap_is_stale(project_dir: Path, db_path: Path, cap_ts: float) -> bool:
-    """True if anything in Loom or the inbox changed after the cap was set —
-    genuinely new information, not the ladder gaming its own cap (see the
-    Priority 2.5 comment in resolve_type() for why the timing argument holds).
-    """
-    if db_path.exists():
-        try:
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            try:
-                for table, statuses in (
-                    ("goals", ("desire", "needs_plan", "review")),
-                    ("projects", ("desire", "needs_plan", "review")),
-                    ("tasks", ("needs_plan", "scheduled", "review")),
-                ):
-                    placeholders = ",".join("?" for _ in statuses)
-                    row = conn.execute(
-                        f"SELECT updated_at FROM {table} WHERE status IN ({placeholders}) "
-                        f"ORDER BY updated_at DESC LIMIT 1",
-                        statuses,
-                    ).fetchone()
-                    if not row or not row["updated_at"]:
-                        continue
-                    ts_str = row["updated_at"]
-                    if ts_str.endswith("Z"):
-                        ts_str = ts_str[:-1] + "+00:00"
-                    try:
-                        updated = datetime.fromisoformat(ts_str)
-                    except ValueError:
-                        continue
-                    if updated.tzinfo is None:
-                        updated = updated.replace(tzinfo=timezone.utc)
-                    if updated.timestamp() > cap_ts:
-                        return True
-            finally:
-                conn.close()
-        except sqlite3.Error:
-            pass
-
-    inbox_path = project_dir / "inbox" / "pending.json"
-    if inbox_path.exists():
-        try:
-            data = json.loads(inbox_path.read_text(encoding="utf-8"))
-            entries = data if isinstance(data, list) else data.get("entries", [])
-            for e in entries:
-                if e.get("processed", False):
-                    continue
-                if e.get("type") not in ("request", "comment"):
-                    continue
-                ts = e.get("timestamp")
-                if isinstance(ts, (int, float)) and ts > cap_ts:
-                    return True
-        except Exception:
-            pass
-
-    return False
 
 
 def _days_since_last_maintenance(project_dir: Path) -> float:

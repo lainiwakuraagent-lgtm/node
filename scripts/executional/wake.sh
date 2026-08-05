@@ -163,33 +163,9 @@ if [ "$last_recorded_night" != "$night_id" ]; then
   echo "0" > "$COUNT_FILE"
   echo "$night_id" > "$DATE_FILE"
   echo "0" > "$STATE_DIR/consecutive_philosophy.count"
-  rm -f "$STATE_DIR/philosophy_cap.active" "$STATE_DIR/philosophy_cap_notified_at.txt"   # Clear philosophy cap on new night
   log_line "New night detected ($night_id). Session counter reset to 0."
 fi
 current_count=$(cat "$COUNT_FILE" 2>/dev/null || echo "0")
-
-# --- Philosophy cap staleness/notification: moved to resolve_session_type.py + the
-# philosophy_cap abort handler below. This used to be a separate nightly-only early
-# exit here that only ever checked the inbox for "is the cap still valid" — it ran
-# before the window check determined WINDOW_TYPE (so it could swallow a legitimate scheduled
-# maintenance/reflection window that should override the cap), never checked the Loom
-# queue itself (only inbox), and being nightly-gated meant emergency/manual mode had
-# no reset path at all short of a full calendar-night rollover once capped. All of
-# that logic now lives in resolve_session_type.py's Priority 2.5 (_cap_is_stale),
-# which is mode-agnostic and Loom-aware, and runs every wake regardless of
-# TRIGGER_MODE — the modest per-wake cost of always invoking it (a few sqlite
-# queries) is a better trade than a second, drifting reimplementation in bash.
-#
-# Full list of what resets consecutive_philosophy.count / philosophy_cap.active:
-#   1. New calendar night (immediately below) — the hard, guaranteed reset.
-#   2. New working window within the same night/day (Gate 3, below) — a cap
-#      hit in one scheduled window must not bleed into and block a later,
-#      unrelated window.
-#   3. A non-philosophy session actually runs (end of this script) — the
-#      normal case once real queue/inbox work appears.
-#   4. Staleness check in resolve_session_type.py's Priority 2.5 — clears an
-#      already-active cap early if something genuinely new landed in Loom or
-#      the inbox after the cap was set.
 
 # --- Gate 1: subscription usage limits (nightly + emergency) ---
 # manual is a deliberate break-glass override: it exists for exactly the case
@@ -288,14 +264,26 @@ if [ "$TRIGGER_MODE" = "nightly" ]; then
     last_window_label=""
     [ -f "$LAST_WINDOW_FILE" ] && last_window_label=$(cat "$LAST_WINDOW_FILE")
     if [ "$last_window_label" != "$WINDOW_LABEL" ]; then
-      log_line "New working window entered ($WINDOW_LABEL, was: ${last_window_label:-none}). Resetting philosophy cap/count."
+      log_line "New working window entered ($WINDOW_LABEL, was: ${last_window_label:-none}). Resetting philosophy count."
       echo "0" > "$STATE_DIR/consecutive_philosophy.count"
-      rm -f "$STATE_DIR/philosophy_cap.active" "$STATE_DIR/philosophy_cap_notified_at.txt"
       echo "$WINDOW_LABEL" > "$LAST_WINDOW_FILE"
     fi
   fi
 else
   log_line "Gate 3 (window check) skipped — TRIGGER_MODE=$TRIGGER_MODE."
+  # Scope the philosophy cap per mode-invocation — same semantics as the
+  # nightly window reset above, keyed on mode instead of WINDOW_LABEL since
+  # emergency/manual have no calendar windows. Switching modes resets the count.
+  LAST_WINDOW_FILE="$STATE_DIR/last_window_label.txt"
+  _mode_label="mode:$TRIGGER_MODE"
+  last_window_label=""
+  [ -f "$LAST_WINDOW_FILE" ] && last_window_label=$(cat "$LAST_WINDOW_FILE")
+  if [ "$last_window_label" != "$_mode_label" ]; then
+    log_line "New mode scope entered ($_mode_label, was: ${last_window_label:-none}). Resetting philosophy count."
+    echo "0" > "$STATE_DIR/consecutive_philosophy.count"
+    echo "$_mode_label" > "$LAST_WINDOW_FILE"
+  fi
+  unset _mode_label
 fi
 
 # session-count hard cap (was Gate 3 in an older revision) was downgraded to
@@ -520,44 +508,12 @@ except Exception:
 
   rm -f "$SESSION_TYPE_RESULT"
 
-  # Gate: abort if consecutive philosophy cap reached (no Claude launch needed).
-  # Runs regardless of TRIGGER_MODE now — resolve_session_type.py's Priority 2.5
-  # already decides staleness (Loom + inbox aware) before ever returning this type,
-  # so by the time we see it here the cap is genuinely still valid for every mode.
+  # Gate: skip if consecutive philosophy cap reached (no Claude launch needed).
+  # resolve_session_type.py's Priority 4 only returns this when queue-state,
+  # inbox, and maintenance have all found nothing — real work always preempts it.
   if [ "$CURRENT_SESSION_TYPE" = "philosophy_cap" ]; then
     _consec=$(cat "$STATE_DIR/consecutive_philosophy.count" 2>/dev/null || echo "3")
-    log_line "ABORT: philosophy cap reached (consecutive_philosophy.count=$_consec). Skipping session."
-    # Write cap-active flag on first hit; stays put on subsequent hits until
-    # resolve_session_type.py finds it stale and clears it.
-    _cap_is_new=0
-    if [ ! -f "$STATE_DIR/philosophy_cap.active" ]; then
-      echo "$(date +%s)" > "$STATE_DIR/philosophy_cap.active"
-      _cap_is_new=1
-    fi
-
-    # T443: proactive notification when cap has been held > threshold. Moved here
-    # (was previously only reachable in a nightly-only early-abort path) so
-    # emergency/manual mode gets notified too instead of silently looping forever.
-    if [ "$_cap_is_new" -eq 0 ]; then
-      _cap_ts=$(cat "$STATE_DIR/philosophy_cap.active" 2>/dev/null | tr -d '[:space:]' || echo "0")
-      _now=$(date +%s)
-      _age=$(( _now - _cap_ts ))
-      _notify_threshold=${PHILOSOPHY_CAP_NOTIFY_THRESHOLD:-7200}
-      _notify_rate=${PHILOSOPHY_CAP_NOTIFY_RATE:-10800}
-      _last_notify=$(cat "$STATE_DIR/philosophy_cap_notified_at.txt" 2>/dev/null | tr -d '[:space:]' || echo "0")
-      _since_notify=$(( _now - _last_notify ))
-      if [ "$_age" -gt "$_notify_threshold" ] && [ "$_since_notify" -gt "$_notify_rate" ]; then
-        _age_h=$(( _age / 3600 ))
-        _cap_time=$(date -d "@${_cap_ts}" '+%H:%M %Z %Y-%m-%d' 2>/dev/null || echo "ts=${_cap_ts}")
-        printf '@Lain philosophy cap: held %dh (since %s, mode=%s). No sessions will run until new work appears or the next nightly boundary resets. To unblock manually: rm state/philosophy_cap.active' \
-          "$_age_h" "$_cap_time" "$TRIGGER_MODE" \
-          | bash "$PROJECT_DIR/tools/conversational/telegram_send.sh" 2>/dev/null || true
-        echo "$_now" > "$STATE_DIR/philosophy_cap_notified_at.txt"
-        log_line "T443: philosophy_cap_alert sent (${_age}s held, mode=$TRIGGER_MODE)"
-      fi
-    fi
-    unset _cap_is_new
-
+    log_line "SKIP: philosophy cap reached (consecutive_philosophy.count=$_consec). No real work in queue."
     write_trigger_result "aborted" "philosophy cap reached (consecutive_philosophy_count=$_consec)"
     rm -f "$AUGMENTED_GOAL" "$DYNAMIC_GOAL_FILE"
     exit 0

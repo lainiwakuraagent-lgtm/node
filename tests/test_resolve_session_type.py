@@ -19,13 +19,10 @@ from pathlib import Path
 # left the import silently broken, since the module moved but this didn't.)
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts" / "executional"))
 from resolve_session_type import (  # noqa: E402
-    _cap_is_stale,
     _check_queue_state,
-    _clear_philosophy_cap,
     _days_since_last_maintenance,
     _fetch_target_context,
     _inbox_has_pending_tasks,
-    _read_cap_active_timestamp,
     _read_default_goal_id,
     load_type_config,
     resolve_type,
@@ -519,10 +516,9 @@ class TestPhilosophyTierResolution(unittest.TestCase):
         self.assertEqual(session_type, "philosophy")
         self.assertIn("tier 3", reason)
 
-    def test_cap_at_consec_three_with_no_prior_cap_file(self):
-        """First time hitting the cap (no philosophy_cap.active yet) still
-        returns philosophy_cap unconditionally -- staleness only applies to
-        an *already active* cap."""
+    def test_cap_at_consec_three_with_empty_queue(self):
+        """consec=3 with an empty queue returns philosophy_cap (cap is checked
+        last, at Priority 4, after queue-state has found nothing to preempt it)."""
         session_type, source, reason, _ = self._resolve_at(3)
         self.assertEqual(session_type, "philosophy_cap")
 
@@ -586,12 +582,14 @@ class TestLoadTypeConfigPhilosophyScope(unittest.TestCase):
         self.assertEqual(config["scope_id"], 1)
 
 
-class TestPhilosophyCapStaleness(unittest.TestCase):
-    """Priority 2.5: an already-active cap clears when something genuinely
-    new happened since it was set (Loom or inbox), and stays put otherwise
-    -- including the anti-gaming case where the only activity predates the
-    cap itself (e.g. a task the blocker-resolution session that hit the cap
-    created)."""
+class TestPhilosophyCapNotBlockedByPreExistingTask(unittest.TestCase):
+    """KEY REGRESSION: cap at Priority 4 must not block pre-existing scheduled tasks.
+
+    The old Priority 2.5 placement returned philosophy_cap before ever opening
+    the Loom DB, making pre-existing scheduled tasks invisible for the entire
+    cap duration. This test is the single assertion that would have caught both
+    agent_project's and blank_node's incidents.
+    """
 
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
@@ -601,89 +599,36 @@ class TestPhilosophyCapStaleness(unittest.TestCase):
         (self.project_dir / "inbox" / "pending.json").write_text("[]", encoding="utf-8")
         self.db_path = self.project_dir / "scratch.db"
         self.conn = _make_scratch_db(self.db_path)
-        (self.project_dir / "state" / "consecutive_philosophy.count").write_text(
-            "3", encoding="utf-8"
-        )
         _seed_recent_maintenance(self.project_dir)
-        self.cap_ts = 1_700_000_000  # arbitrary fixed epoch, well in the past
-        (self.project_dir / "state" / "philosophy_cap.active").write_text(
-            str(self.cap_ts), encoding="utf-8"
-        )
 
     def tearDown(self):
         self.conn.close()
         self.tmpdir.cleanup()
 
-    def _iso(self, epoch_offset):
-        dt = datetime.fromtimestamp(self.cap_ts + epoch_offset, tz=timezone.utc)
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    def test_loom_activity_after_cap_clears_it(self):
+    def test_pre_existing_scheduled_task_beats_cap(self):
+        """consec=3 + a scheduled task whose updated_at predates everything
+        => execution, not philosophy_cap. The task existed before the cap
+        could have fired; under the old Priority 2.5 gate it was invisible."""
         self.conn.execute(
             "INSERT INTO tasks (id, name, status, updated_at) VALUES (1, 'T', 'scheduled', ?)",
-            (self._iso(+3600),),
+            ("2026-01-01T00:00:00Z",),
         )
         self.conn.commit()
-        self.assertTrue(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
-
-        session_type, source, reason, target = resolve_type(self.project_dir, "nightly", self.db_path)
-        self.assertNotEqual(session_type, "philosophy_cap")
-        self.assertEqual(
-            (self.project_dir / "state" / "consecutive_philosophy.count").read_text().strip(), "0"
+        (self.project_dir / "state" / "consecutive_philosophy.count").write_text(
+            "3", encoding="utf-8"
         )
-        self.assertFalse((self.project_dir / "state" / "philosophy_cap.active").exists())
-
-    def test_loom_activity_only_before_cap_does_not_clear_it(self):
-        """Anti-gaming case: a task updated *before* the cap was set (e.g. by
-        the blocker-resolution session that pushed the counter to 3 in the
-        first place) must not be able to clear its own cap."""
-        self.conn.execute(
-            "INSERT INTO tasks (id, name, status, updated_at) VALUES (1, 'T', 'scheduled', ?)",
-            (self._iso(-3600),),
-        )
-        self.conn.commit()
-        self.assertFalse(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
-
         session_type, source, reason, target = resolve_type(self.project_dir, "nightly", self.db_path)
+        self.assertEqual(session_type, "execution")
+
+    def test_empty_queue_still_returns_cap(self):
+        """consec=3 with nothing in the queue => philosophy_cap (cap is valid
+        when no real work preempts it at Priority 3)."""
+        (self.project_dir / "state" / "consecutive_philosophy.count").write_text(
+            "3", encoding="utf-8"
+        )
+        fake_db = self.project_dir / "nonexistent.db"
+        session_type, source, reason, target = resolve_type(self.project_dir, "nightly", fake_db)
         self.assertEqual(session_type, "philosophy_cap")
-
-    def test_inbox_activity_after_cap_clears_it(self):
-        (self.project_dir / "inbox" / "pending.json").write_text(
-            json.dumps([{"type": "comment", "processed": False,
-                         "timestamp": self.cap_ts + 3600}]),
-            encoding="utf-8",
-        )
-        self.assertTrue(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
-
-    def test_inbox_activity_only_before_cap_does_not_clear_it(self):
-        (self.project_dir / "inbox" / "pending.json").write_text(
-            json.dumps([{"type": "comment", "processed": False,
-                         "timestamp": self.cap_ts - 3600}]),
-            encoding="utf-8",
-        )
-        self.assertFalse(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
-
-    def test_no_activity_at_all_keeps_cap(self):
-        self.assertFalse(_cap_is_stale(self.project_dir, self.db_path, self.cap_ts))
-        session_type, source, reason, target = resolve_type(self.project_dir, "nightly", self.db_path)
-        self.assertEqual(session_type, "philosophy_cap")
-
-    def test_clear_philosophy_cap_removes_files_and_resets_count(self):
-        notified_file = self.project_dir / "state" / "philosophy_cap_notified_at.txt"
-        notified_file.write_text(str(self.cap_ts), encoding="utf-8")
-        _clear_philosophy_cap(self.project_dir)
-        self.assertFalse((self.project_dir / "state" / "philosophy_cap.active").exists())
-        self.assertFalse(notified_file.exists())
-        self.assertEqual(
-            (self.project_dir / "state" / "consecutive_philosophy.count").read_text().strip(), "0"
-        )
-
-    def test_read_cap_active_timestamp_missing_file_returns_none(self):
-        (self.project_dir / "state" / "philosophy_cap.active").unlink()
-        self.assertIsNone(_read_cap_active_timestamp(self.project_dir))
-
-    def test_read_cap_active_timestamp_reads_value(self):
-        self.assertEqual(_read_cap_active_timestamp(self.project_dir), float(self.cap_ts))
 
 
 if __name__ == "__main__":

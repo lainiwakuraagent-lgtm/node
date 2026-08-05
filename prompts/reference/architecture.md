@@ -26,10 +26,6 @@ invokes `scripts/executional/wake.sh` with `TRIGGER_MODE` set to `nightly`,
 **Gate sequence** (in order; a gate that fails aborts before any Claude session
 launches):
 
-- **Philosophy-cap early-abort** — if `state/philosophy_cap.active` exists and
-  `TRIGGER_MODE=nightly`, checks whether the inbox has real work first; if not,
-  aborts immediately (before the cost of full type resolution). Cleared on a new
-  night or when inbox work appears.
 - **Gate 0 — usage limits** (nightly + emergency): fails closed only on a confirmed
   "usage limit exceeded"; fails *open* on a check error (network/auth issues never
   silently kill the launch). `manual` bypasses this gate entirely — a deliberate
@@ -111,9 +107,9 @@ order:
    `MAINTENANCE_INTERVAL_DAYS` (default 2) since the last maintenance session
    (per `logs/session_log.csv`), forces **maintenance**.
 7. **Default — the philosophy escalation ladder.** Nothing eligible anywhere means an
-   empty queue, which selects a sub-mode by `consecutive_philosophy_count`: 0 →
-   `philosophy`, 1 → `creative`, 2 → `blocker_resolver`, 3+ → `philosophy_cap` (§3
-   already returned this earlier, so this branch only reaches 0-2 in practice).
+   empty queue. Checked last at Priority 4: `consecutive_philosophy_count` 0/1/2 →
+   `philosophy` (tier 1/2/3), 3+ → `philosophy_cap`. Placing the cap here (after
+   queue-state) means a pre-existing scheduled task always preempts it.
 
 **The types themselves**, one line each:
 
@@ -128,12 +124,10 @@ order:
 - **maintenance** — structural upkeep, 3-way scope rotation
   (`maintenance_scope{1,2,3}.yaml`) that advances by one on every maintenance session
   regardless of trigger source.
-- **philosophy / creative / blocker_resolver** — the identity/reflection ladder for an
-  empty queue. **Note:** these were consolidated in design (`config/session_types/philosophy.yaml`
-  + `philosophy_scope{1,2,3}.yaml` + one `philosophy_prompt.md`) but the dispatcher
-  above still returns the three legacy type names driven by the same counter — the
-  unification isn't wired through `resolve_session_type.py` yet. Don't assume the
-  YAML consolidation implies the dispatch logic already matches it.
+- **philosophy** — the identity/reflection ladder for an empty queue. Three tiers
+  selected by `consecutive_philosophy_count` via the YAML scope-merge
+  (`philosophy.yaml` + `philosophy_scope{1,2,3}.yaml`). The dispatcher returns
+  the single type id `philosophy`; tier selection is a `load_type_config()` concern.
 - **reflection** — picked over `philosophy` by `WINDOW_TYPE=reflection` lanes when a
   recent philosophy session already happened (last 3 days), so reflection windows
   don't just re-trigger the same identity work.
@@ -241,7 +235,7 @@ task touching one of these four categories falls under that SOP's procedure:
 - **Bootstrap/wake chain**: `scripts/executional/wake.sh`, the systemd timer units,
   `scripts/executional/splice_prompt.py`, `scripts/executional/resolve_session_type.py`,
   `config/session_types/*.yaml`, `prompts/core/*.md`, the lock/gate files
-  (`state/session.lock`, `state/emergency_mode.active`, `state/philosophy_cap.active`),
+  (`state/session.lock`, `state/emergency_mode.active`),
   `session_trigger_server.py`, `scripts/executional/check_window.py`,
   `tools/executional/khal_schedule_reader.py`, `config/session_schedule.json`.
 - **Identity/memory chain**: `memory/identity/soul.md`, `memory/latest_summary.md`,
