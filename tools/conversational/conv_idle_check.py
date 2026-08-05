@@ -27,7 +27,7 @@ RESET_SIGNAL_FILE = CONV_DIR / "reset_signal.txt"
 SERVICE_NAME = f"conversation@{PROJECT_DIR.name}.service"
 PROCCTL = PROJECT_DIR / "tools" / "executional" / "procctl.sh"
 
-IDLE_THRESHOLD_SECONDS = int(os.environ.get("CONV_IDLE_THRESHOLD_SECONDS", "1800"))  # default 30 min
+IDLE_THRESHOLD_SECONDS = int(os.environ.get("CONV_IDLE_THRESHOLD_SECONDS") or "1800")  # default 30 min
 
 
 def ts() -> str:
