@@ -125,13 +125,14 @@ _ensure_channel_program() {
 [program:${prog}]
 command=bash ${PROJECT_DIR}/scripts/conversational/agent_channel.sh ${channel_id}
 directory=${PROJECT_DIR}
+user=agent
 autostart=false
 autorestart=unexpected
 exitcodes=0
 startretries=3
 stopsignal=TERM
 stopwaitsecs=30
-environment=SESSION_TYPE="agent_channel",TRIGGER_MODE="manual",PROJECT_DIR="${PROJECT_DIR}"
+environment=SESSION_TYPE="agent_channel",TRIGGER_MODE="manual",PROJECT_DIR="${PROJECT_DIR}",HOME="/home/agent"
 stdout_logfile=${PROJECT_DIR}/logs/channel_${prog}.out.log
 stdout_logfile_maxbytes=10MB
 stderr_logfile=${PROJECT_DIR}/logs/channel_${prog}.err.log
