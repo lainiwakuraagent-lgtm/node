@@ -39,8 +39,8 @@ fi
 
 # ── Fetch upstream ────────────────────────────────────────────────────────────
 log "Fetching origin/main from $BLANK_NODE_DIR"
-if ! git -C "$BLANK_NODE_DIR" fetch origin main --quiet 2>/dev/null; then
-  log "WARN: git fetch failed (network issue?) — skipping sync this wake."
+if ! timeout 30 git -C "$BLANK_NODE_DIR" fetch origin main --quiet 2>/dev/null; then
+  log "WARN: git fetch failed or timed out — skipping sync this wake."
   exit 0
 fi
 
@@ -136,6 +136,13 @@ if [ ${#FILES_TO_SYNC[@]} -eq 0 ]; then
   echo "$UPSTREAM_SHA" > "$NODE_VERSION_FILE"
   exit 0
 fi
+
+# ── Prune old backups (keep 5 most recent) ───────────────────────────────────
+mapfile -t OLD_BACKUPS < <(ls -1dt "$STATE_DIR"/cicd_backup_* 2>/dev/null | tail -n +6)
+for old in "${OLD_BACKUPS[@]}"; do
+  rm -rf "$old"
+  log "Pruned old backup: $(basename "$old")"
+done
 
 # ── Backup existing files ─────────────────────────────────────────────────────
 BACKUP_TS=$(date +%Y%m%d_%H%M%S)
