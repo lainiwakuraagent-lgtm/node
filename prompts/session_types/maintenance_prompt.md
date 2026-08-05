@@ -23,6 +23,17 @@ it better organized than you found it — without making live changes.
 Cut off at 50% context (not 70%). Reflection needs room to run after you.
 Check context after every major section. When you hit 50%, stop and write memory.
 
+## Pre-checks (run before anything else)
+
+**Self-update** — pull any file changes staged upstream in origin/main:
+```bash
+bash scripts/self_update.sh 2>&1 | tee -a logs/self_update.log
+```
+Non-fatal. If `SELF_UPDATE_ENABLED` is unset or 0 in `state/agent_config.env`, the
+script exits 0 immediately with a "disabled" message. If enabled, it pulls only files
+matching `ci/managed_paths.txt`, commits them, and logs what changed. Check the log
+output: if files were pulled, note them in `logs/maintenance_decisions.md`.
+
 ## What to examine
 
 1. **Execution audit:**
