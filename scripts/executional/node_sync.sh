@@ -268,3 +268,9 @@ PYEOF
 rm -f "$_TMP_SYNCED" "$_TMP_SKIPPED"
 
 log "Sync complete: ${PINNED_SHA:-none} → $UPSTREAM_SHA (${#SYNCED_FILES[@]} files). Manifest: $MANIFEST_FILE"
+
+# ── Outbox notification (T516) ────────────────────────────────────────────────
+SHORT_SHA="${UPSTREAM_SHA:0:8}"
+/usr/bin/python3 "$PROJECT_DIR/tools/outbox.py" send \
+  --content "CI/CD sync: ${#SYNCED_FILES[@]} file(s) updated (blank_node $SHORT_SHA)" \
+  --from "node_sync" --type message --to owner 2>/dev/null || true
