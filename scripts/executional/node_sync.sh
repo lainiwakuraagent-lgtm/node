@@ -17,6 +17,17 @@ mkdir -p "$LOG_DIR"
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] node_sync: $*" | tee -a "$LOG_FILE"; }
 
+# ── Read agent_config.env when vars not inherited from caller ─────────────────
+# wake.sh sources agent_config.env but does not export the vars, so subprocesses
+# invoked via `bash node_sync.sh` see them as unset. Read directly as fallback.
+AGENT_CONFIG="$PROJECT_DIR/state/agent_config.env"
+if [ -f "$AGENT_CONFIG" ]; then
+  _cfg_val() { grep -E "^$1=" "$AGENT_CONFIG" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' '; }
+  CI_CD_ENABLED="${CI_CD_ENABLED:-$(_cfg_val CI_CD_ENABLED)}"
+  BLANK_NODE_DIR="${BLANK_NODE_DIR:-$(_cfg_val BLANK_NODE_DIR)}"
+  BLANK_NODE_REPO="${BLANK_NODE_REPO:-$(_cfg_val BLANK_NODE_REPO)}"
+fi
+
 # ── CI/CD gate ────────────────────────────────────────────────────────────────
 if [ "${CI_CD_ENABLED:-false}" != "true" ]; then
   log "CI_CD_ENABLED=${CI_CD_ENABLED:-false} — skip"
@@ -24,8 +35,7 @@ if [ "${CI_CD_ENABLED:-false}" != "true" ]; then
 fi
 
 # ── Validate blank_node dir ───────────────────────────────────────────────────
-BLANK_NODE_DIR="${BLANK_NODE_DIR:-}"
-if [ -z "$BLANK_NODE_DIR" ]; then
+if [ -z "${BLANK_NODE_DIR:-}" ]; then
   log "ERROR: BLANK_NODE_DIR not set in agent_config.env — cannot sync. Set CI_CD_ENABLED=false to suppress this message."
   exit 0
 fi
@@ -34,8 +44,7 @@ if [ "$BLANK_NODE_DIR" -ef "$PROJECT_DIR" ] 2>/dev/null || [ "$(realpath "$BLANK
   exit 0
 fi
 if [ ! -d "$BLANK_NODE_DIR/.git" ]; then
-  BLANK_NODE_REPO="${BLANK_NODE_REPO:-}"
-  if [ -n "$BLANK_NODE_REPO" ]; then
+  if [ -n "${BLANK_NODE_REPO:-}" ]; then
     log "BLANK_NODE_DIR has no .git — cloning from $BLANK_NODE_REPO..."
     mkdir -p "$(dirname "$BLANK_NODE_DIR")"
     if ! timeout 120 git clone --depth 1 "$BLANK_NODE_REPO" "$BLANK_NODE_DIR" >> "$LOG_FILE" 2>&1; then
