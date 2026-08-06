@@ -173,13 +173,16 @@ def save_state(state: dict) -> None:
 # Channel discovery
 # ---------------------------------------------------------------------------
 
-def discover_channels(token: str) -> dict[str, str]:
+def discover_channels(token: str) -> "dict[str, str] | None":
     """
     Return {channel_id: peer_id} for all DM conversations we're part of.
-    Falls back to empty dict if Nexus is unreachable or token expired.
+    Returns None on 401/network failure (signals re-auth needed to caller).
+    Returns empty dict {} if the request succeeds but no channels exist.
     """
     result = nexus_get("/conversations/", token)
-    if not result or not isinstance(result, list):
+    if result is None:
+        return None  # 401 or network error — caller should re-auth
+    if not isinstance(result, list):
         return {}
     channels: dict[str, str] = {}
     for conv in result:

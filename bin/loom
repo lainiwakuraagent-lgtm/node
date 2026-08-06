@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
-# loom — per-agent wrapper for t438-test2
-LOOM_DIR="/home/andrii/lain/blank_node/loom"
-LOOM_DB="/home/andrii/.local/share/loom/t438-test2.db"
+# loom — per-agent Loom CLI wrapper.
+# Reads LOOM_SRC and LOOM_DB from state/agent_config.env if available,
+# so every node instance uses its own database without manual editing.
+_PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+_AGENT_CFG="${_PROJECT_DIR}/state/agent_config.env"
+
+LOOM_DIR=""
+LOOM_DB=""
+if [ -f "$_AGENT_CFG" ]; then
+  _val=$(grep "^LOOM_SRC=" "$_AGENT_CFG" 2>/dev/null | cut -d= -f2-)
+  [ -n "$_val" ] && LOOM_DIR="$_val"
+  _val=$(grep "^LOOM_DB=" "$_AGENT_CFG" 2>/dev/null | cut -d= -f2-)
+  [ -n "$_val" ] && LOOM_DB="$_val"
+fi
+
+LOOM_DIR="${LOOM_DIR:-${_PROJECT_DIR}/loom}"
+LOOM_DB="${LOOM_DB:-${HOME}/.local/share/loom/loom.db}"
+
 _loom_cli() {
   env PYTHONPATH="${LOOM_DIR}" "${LOOM_DIR}/.venv/bin/python" -m loom.cli --db "${LOOM_DB}" "$@"
 }
