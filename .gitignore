@@ -50,6 +50,7 @@ memory/work/
 
 # Identity — credentials never go to git
 identity/credentials.md
+identity/agent.env
 identity/nexus_seed_passwords.txt
 
 # Python cache
