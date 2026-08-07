@@ -23,6 +23,7 @@ Exit codes:
     2 — fatal error (token missing, etc.)
 """
 
+import http.client
 import json
 import os
 import signal
@@ -40,6 +41,7 @@ PROJECT_DIR = SCRIPT_DIR.parent.parent
 _FALLBACK_ENV_FILE = Path.home() / ".claude" / ".env"
 LAST_UPDATE_FILE = PROJECT_DIR / "state" / "conversation" / "last_update_id.txt"
 WATCHER_PID_FILE = PROJECT_DIR / "state" / "conversation" / "watcher.pid"
+HEARTBEAT_FILE = PROJECT_DIR / "state" / "conversation" / "watcher_heartbeat.txt"
 OUTBOX_FILE = PROJECT_DIR / "state" / "conversation" / "outbox.json"
 LAST_REAL_MSG_FILE = PROJECT_DIR / "state" / "conversation" / "last_real_message_at.txt"
 CHAT_ACTION_SH = PROJECT_DIR / "tools" / "conversational" / "telegram_chat_action.sh"
@@ -135,13 +137,32 @@ def save_last_update_id(update_id: int) -> None:
 
 def get_updates(token: str, offset: int) -> list:
     """Call getUpdates with long-polling. Returns list of update dicts."""
-    url = (
-        f"https://api.telegram.org/bot{token}/getUpdates"
+    path = (
+        f"/bot{token}/getUpdates"
         f"?offset={offset}&limit=10&timeout={LONG_POLL_TIMEOUT}"
     )
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=LONG_POLL_TIMEOUT + 5) as resp:
-        data = json.loads(resp.read())
+    # SIGALRM: hard ceiling on total transaction time. Belt-and-suspenders
+    # behind the socket-level timeout — catches stale ESTABLISHED connections
+    # that drip-feed TCP keep-alives and bypass SO_TIMEOUT.
+    def _alarm_handler(signum: int, frame: object) -> None:
+        raise TimeoutError("getUpdates: total response time exceeded")
+    old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+    signal.alarm(LONG_POLL_TIMEOUT + 10)
+    try:
+        # Use HTTPSConnection directly (not urllib.request) so we always open a
+        # fresh TCP+TLS connection and close it explicitly at the end. urllib's
+        # connection pool silently reuses stale ESTABLISHED sockets whose recv()
+        # blocks indefinitely despite socket timeout + SIGALRM (T553/T554 fix).
+        conn = http.client.HTTPSConnection("api.telegram.org", timeout=LONG_POLL_TIMEOUT + 5)
+        try:
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            data = json.loads(resp.read())
+        finally:
+            conn.close()
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
     if not data.get("ok"):
         raise RuntimeError(f"getUpdates error: {data}")
     return data.get("result", [])
@@ -408,6 +429,12 @@ def main() -> int:
     offset = load_last_update_id()
 
     while True:
+        # Touch heartbeat — lets conv_watchdog.py detect hung (not crashed) watcher.
+        try:
+            HEARTBEAT_FILE.write_text(str(int(time.time())))
+        except OSError:
+            pass
+
         # --- STATE-TRANSITION SIGNAL CHECK ---
         # Runs before every poll cycle. Structural guarantee: the agent cannot
         # receive a Telegram message without the watcher having first checked for
@@ -435,7 +462,7 @@ def main() -> int:
             updates = get_updates(token, offset)
         except KeyboardInterrupt:
             return 1
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as e:
             print(f"Network error: {e} — retrying in {RETRY_DELAY}s", file=sys.stderr)
             time.sleep(RETRY_DELAY)
             continue

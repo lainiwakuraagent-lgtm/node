@@ -35,10 +35,13 @@ LOG_DIR = PROJECT_DIR / "logs"
 
 LAST_UPDATE_FILE = CONV_DIR / "last_update_id.txt"
 WATCHER_PID_FILE = CONV_DIR / "watcher.pid"
+HEARTBEAT_FILE = CONV_DIR / "watcher_heartbeat.txt"
 WATCHDOG_STATE_FILE = CONV_DIR / "watchdog_state.json"
 WAKE_LOG = LOG_DIR / "wake.log"
 
 STALE_THRESHOLD_MINUTES = 15
+# If the watcher is alive but heartbeat is this stale, it is hung (not idle).
+HEARTBEAT_HUNG_SECONDS = 180  # 3× LONG_POLL_TIMEOUT
 SERVICE_NAME = f"conversation@{PROJECT_DIR.name}.service"
 PROCCTL = PROJECT_DIR / "tools" / "executional" / "procctl.sh"
 
@@ -190,25 +193,52 @@ def main() -> int:
         save_watchdog_state(state)
         return 0
 
-    # --- SECONDARY CHECK: stale + watcher dead? ---
+    # --- SECONDARY CHECK: stale + watcher dead OR hung? ---
     alive = watcher_alive()
     if alive:
-        log(f"update_id stale for {stale_minutes:.1f}min but watcher PID is alive. Likely long-poll idle. OK.")
-        save_watchdog_state(state)
-        return 0
+        # Watcher process exists. Check heartbeat to distinguish idle from hung.
+        # An idle watcher updates the heartbeat every ~25s (LONG_POLL_TIMEOUT).
+        # A hung watcher is alive but stuck in recv() — heartbeat goes stale.
+        heartbeat_age = None
+        if HEARTBEAT_FILE.exists():
+            try:
+                hb_ts = int(HEARTBEAT_FILE.read_text().strip())
+                heartbeat_age = now - hb_ts
+            except (ValueError, OSError):
+                pass
 
-    # Watcher dead AND update_id stale for >15min → conversation layer stuck.
+        if heartbeat_age is None or heartbeat_age < HEARTBEAT_HUNG_SECONDS:
+            log(
+                f"update_id stale for {stale_minutes:.1f}min, watcher alive, "
+                f"heartbeat age {heartbeat_age:.0f}s — long-poll idle. OK."
+                if heartbeat_age is not None
+                else f"update_id stale for {stale_minutes:.1f}min, watcher alive, no heartbeat file — OK."
+            )
+            save_watchdog_state(state)
+            return 0
+
+        # Watcher is alive but heartbeat stale → HUNG (not idle). Kill it.
+        log(
+            f"SECONDARY: watcher alive but heartbeat stale {heartbeat_age:.0f}s "
+            f"(>{HEARTBEAT_HUNG_SECONDS}s) — watcher is hung. "
+            f"Restarting {SERVICE_NAME} (restart #{state.get('restart_count', 0) + 1})."
+        )
+        reason = "hung"
+    else:
+        # Watcher dead AND update_id stale → conversation layer stuck.
+        log(
+            f"SECONDARY: watcher dead AND update_id stale for {stale_minutes:.1f}min. "
+            f"Restarting {SERVICE_NAME} (restart #{state.get('restart_count', 0) + 1})."
+        )
+        reason = "dead"
+
     state["restart_count"] = state.get("restart_count", 0) + 1
     state["last_restart_at"] = now
     state["last_update_id_changed_at"] = now  # reset so we don't re-trigger immediately
     save_watchdog_state(state)
-    log(
-        f"SECONDARY: watcher dead AND update_id stale for {stale_minutes:.1f}min. "
-        f"Restarting {SERVICE_NAME} (restart #{state['restart_count']})."
-    )
     restart_service(args.dry_run)
     alert = (
-        f"@Lain watchdog: conversation watcher was dead ({stale_minutes:.0f}min stale) — "
+        f"watchdog: conversation watcher was {reason} ({stale_minutes:.0f}min stale) — "
         f"restarted conversation.service. (restart #{state['restart_count']}) (╥_╥)"
     )
     send_alert(alert, args.dry_run)
