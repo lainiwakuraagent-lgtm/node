@@ -183,6 +183,22 @@ while IFS= read -r _sw_pid; do
 done < <(pgrep -f "telegram_watcher.py" 2>/dev/null || true)
 [ "$_sw_killed" = "1" ] && sleep 1 || true
 
+# One-time startup sweep: kill orphaned Claude sessions from prior conversation.sh runs.
+# An orphaned Claude process has "conv_prompt" in its cmdline (launched by conversation.sh)
+# but PPID=1 (reparented to init — its parent conversation.sh already died). If left alive
+# it holds the Telegram bot token and causes HTTP 409 conflicts for the new session.
+log_line "CONV: startup — sweeping for orphaned Claude sessions."
+_oc_killed=0
+while IFS= read -r _oc_pid; do
+    _oc_ppid=$(ps -o ppid= -p "$_oc_pid" 2>/dev/null | tr -d '[:space:]' || echo "")
+    if [[ "$_oc_ppid" == "1" ]]; then
+        log_line "CONV: startup sweep — killing orphaned Claude PID $_oc_pid (conv_prompt, PPID=1)."
+        kill "$_oc_pid" 2>/dev/null || true
+        _oc_killed=1
+    fi
+done < <(pgrep -f "conv_prompt" 2>/dev/null || true)
+[ "$_oc_killed" = "1" ] && sleep 2 || true
+
 # --- Auto-restart loop ---
 RESTART_COUNT=0
 LAST_EXIT_REASON=""
