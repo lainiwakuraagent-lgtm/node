@@ -5,7 +5,7 @@ Configuration is read from the environment (wake.sh sources state/agent_config.e
 before sessions start) or from state/agent_config.env directly for standalone use.
 
 Required env vars:
-  HONCHO_URL          — base URL of the Honcho server (e.g. http://100.78.161.59:8100)
+  HONCHO_URL          — base URL of the Honcho server (e.g. http://<TARGET_HOST>:8100)
   HONCHO_WORKSPACE    — workspace ID (e.g. my-agent-workspace)
 
 Optional env vars:
@@ -306,7 +306,7 @@ if __name__ == "__main__":
 
     if not _enabled():
         print("HONCHO_URL is not configured — set it in state/agent_config.env first.")
-        print("Example:  HONCHO_URL=http://100.78.161.59:8100")
+        print("Example:  HONCHO_URL=http://<TARGET_HOST>:8100")
         sys.exit(1)
 
     print(f"Honcho base : {HONCHO_BASE}")

@@ -51,7 +51,7 @@ WATCHER_QUEUE_FILE = PROJECT_DIR / "state" / "nexus_watcher_queue.json"
 CHECK_CONTEXT_SCRIPT = PROJECT_DIR / "tools" / "check_context.sh"
 CHANNELS_DIR = PROJECT_DIR / "state" / "agent_channels"
 
-NEXUS_URL = os.environ.get("NEXUS_URL", "http://100.110.36.84:8900")
+NEXUS_URL = os.environ.get("NEXUS_URL", "http://<YOUR_NEXUS_IP>:8900")
 NEXUS_USERNAME = os.environ.get("NEXUS_USERNAME", os.environ.get("AGENT_NAME", "lain"))
 
 POLL_INTERVAL = 30  # seconds between poll cycles when idle

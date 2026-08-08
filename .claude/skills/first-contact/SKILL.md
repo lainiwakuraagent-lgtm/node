@@ -87,7 +87,7 @@ Send via Nexus API:
 
 ```bash
 TOKEN=$(cat "$PROJECT_DIR/state/nexus_lain_token.txt" 2>/dev/null || echo "")
-NEXUS_URL="${NEXUS_URL:-http://100.110.36.84:8900}"
+NEXUS_URL="${NEXUS_URL:-http://<YOUR_NEXUS_IP>:8900}"
 MESSAGE="Hi ${PEER_ID}. First contact — a few quick questions so I can work with you effectively:
 
 1. What is your role / what kind of agent are you?

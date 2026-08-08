@@ -11,8 +11,8 @@
 #   bash install.sh --skip-nexus --skip-telegram   # minimal local install
 #
 # Usage (remote):
-#   bash install.sh --remote --target-host 100.78.161.59 --target-user xxx \
-#     --agent-name orchestrator --owner-name andrii
+#   bash install.sh --remote --target-host <TARGET_HOST> --target-user <TARGET_USER> \
+#     --agent-name orchestrator --owner-name <OWNER_NAME>
 #
 # Non-interactive env vars (used when --non-interactive or a value is missing):
 #   AGENT_NAME, OWNER_NAME, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID,
@@ -20,11 +20,11 @@
 #
 # Flags:
 #   --agent-name <name>        Required. Slug: lowercase letters, digits, hyphens, underscores.
-#   --owner-name <name>        Owner's short name (default: andrii)
+#   --owner-name <name>        Owner's short name (required)
 #   --model <id>               Claude model ID (default from .example or claude-sonnet-4-6)
 #   --telegram-token <token>   Telegram bot token (or set TELEGRAM_TOKEN)
 #   --telegram-chat-id <id>    Telegram chat ID (or set TELEGRAM_CHAT_ID)
-#   --nexus-url <url>          Nexus URL (default: http://100.110.36.84:8900)
+#   --nexus-url <url>          Nexus URL (default: http://<YOUR_NEXUS_IP>:8900)
 #   --nexus-password <pw>      Nexus password (or set NEXUS_PASSWORD)
 #   --skip-telegram            Skip Telegram credential setup
 #   --skip-nexus               Skip Nexus registration
@@ -51,11 +51,11 @@ PROJECT_DIR="$SCRIPT_DIR"
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
 AGENT_NAME="${AGENT_NAME:-}"
-OWNER_NAME="${OWNER_NAME:-andrii}"
+OWNER_NAME="${OWNER_NAME:-}"
 MODEL="${MODEL:-}"
 TELEGRAM_TOKEN="${TELEGRAM_TOKEN:-}"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
-NEXUS_URL="${NEXUS_URL:-http://100.110.36.84:8900}"
+NEXUS_URL="${NEXUS_URL:-http://<YOUR_NEXUS_IP>:8900}"
 NEXUS_PASSWORD="${NEXUS_PASSWORD:-}"
 
 SKIP_TELEGRAM=0
@@ -99,12 +99,12 @@ Usage (local):
   bash install.sh --skip-nexus --skip-telegram   # minimal local install
 
 Usage (remote/SSH):
-  bash install.sh --remote --target-host 100.78.161.59 --target-user xxx \
-    --agent-name orchestrator --owner-name andrii
+  bash install.sh --remote --target-host <TARGET_HOST> --target-user <TARGET_USER> \
+    --agent-name orchestrator --owner-name <OWNER_NAME>
 
 Flags:
   --agent-name <name>        Required. Lowercase, digits, hyphens, underscores.
-  --owner-name <name>        Owner's short name (default: andrii)
+  --owner-name <name>        Owner's short name (required)
   --model <id>               Claude model ID (default: from .example)
   --telegram-token <token>   Telegram bot token  (or env TELEGRAM_TOKEN)
   --telegram-chat-id <id>    Telegram chat ID    (or env TELEGRAM_CHAT_ID)
@@ -348,7 +348,7 @@ if [ "$NON_INTERACTIVE" = "0" ] && [ "$DRY_RUN" = "0" ] && [ "$REMOTE" = "0" ]; 
 fi
 
 prompt_value AGENT_NAME "Agent name (slug, e.g. 'my-agent')" ""
-prompt_value OWNER_NAME "Owner name" "andrii"
+prompt_value OWNER_NAME "Owner name" ""
 
 if [[ ! "$AGENT_NAME" =~ ^[a-z0-9_-]+$ ]]; then
   err "AGENT_NAME must be lowercase letters, digits, hyphens, or underscores only"

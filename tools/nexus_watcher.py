@@ -47,7 +47,7 @@ PASS_FILE = PROJECT_DIR / "identity" / "nexus_seed_passwords.txt"
 CHANNELS_DIR = PROJECT_DIR / "state" / "agent_channels"
 PROCCTL = PROJECT_DIR / "tools" / "executional" / "procctl.sh"
 
-NEXUS_URL = os.environ.get("NEXUS_URL", "http://100.110.36.84:8900")
+NEXUS_URL = os.environ.get("NEXUS_URL", "http://<YOUR_NEXUS_IP>:8900")
 NEXUS_USERNAME = os.environ.get("NEXUS_USERNAME", "lain")
 
 POLL_INTERVAL = 30  # seconds

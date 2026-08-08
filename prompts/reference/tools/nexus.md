@@ -26,7 +26,7 @@ All Nexus API calls use a short-lived bearer token obtained via `POST /auth/toke
 
 | Var | Default | Notes |
 |-----|---------|-------|
-| `NEXUS_URL` | `http://100.110.36.84:8900` | Set in install or `state/agent_config.env` |
+| `NEXUS_URL` | `http://<YOUR_NEXUS_IP>:8900` | Set in install or `state/agent_config.env` |
 | `NEXUS_USERNAME` | `lain` (dispatcher) / `$AGENT_NAME` (channel watcher) | Identity; matches the registered username |
 | `NEXUS_PASSWORD` | — | Highest-priority override; else fallback chain above |
 

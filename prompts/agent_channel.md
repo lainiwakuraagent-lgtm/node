@@ -157,7 +157,7 @@ Send a message to the peer on this channel:
 
 ```bash
 TOKEN=$(cat state/nexus_lain_token.txt 2>/dev/null || echo "")
-NEXUS_URL="${NEXUS_URL:-http://100.110.36.84:8900}"
+NEXUS_URL="${NEXUS_URL:-http://<YOUR_NEXUS_IP>:8900}"
 # ${CHANNEL_ID} is the conversation UUID
 /usr/bin/curl -sf -X POST "${NEXUS_URL}/messages/${CHANNEL_ID}" \
   -H "Authorization: Bearer ${TOKEN}" \

@@ -46,9 +46,9 @@ if [ -f "$AGENT_CONFIG" ]; then
   source "$AGENT_CONFIG"
 fi
 AGENT_NAME="${AGENT_NAME:-agent}"
-OWNER_NAME="${OWNER_NAME:-andrii}"
+OWNER_NAME="${OWNER_NAME:-owner}"
 NODE_VERSION="${NODE_VERSION:-claude-sonnet-4-6}"
-NEXUS_URL="${NEXUS_URL:-http://100.110.36.84:8900}"
+NEXUS_URL="${NEXUS_URL:-http://<YOUR_NEXUS_IP>:8900}"
 LOOM_SRC="${HOME}/lain/loom"
 LOOM_DB="${HOME}/.local/share/loom/loom.db"
 

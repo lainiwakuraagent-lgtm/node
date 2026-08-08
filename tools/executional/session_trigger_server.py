@@ -13,7 +13,7 @@ of just confirming a subprocess was spawned.
 Auth: X-Trigger-Token header OR ?token=<value> query param.
 Token is stored in state/trigger_token.txt.
 
-iOS Shortcut: POST to http://100.110.36.84:8766/trigger
+iOS Shortcut: POST to http://<YOUR_NEXUS_IP>:8766/trigger
               Header: X-Trigger-Token: <value from trigger_token.txt>
 
 Usage:
